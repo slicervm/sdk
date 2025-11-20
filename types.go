@@ -42,9 +42,10 @@ func (n *SlicerCreateNodeResponse) IPAddress() net.IP {
 
 // SlicerHostGroup represents a host group from the /hostgroup endpoint.
 type SlicerHostGroup struct {
-	Name  string `json:"name"`
-	Count int    `json:"count"`
-	RAMGB int    `json:"ram_gb"`
-	VCPU  int    `json:"vcpu"`
-	Arch  string `json:"arch,omitempty"`
+	Name     string `json:"name"`
+	Count    int    `json:"count"`
+	RAMGB    int    `json:"ram_gb"`
+	VCPU     int    `json:"vcpu"`
+	Arch     string `json:"arch,omitempty"`
+	GPUCount int    `json:"gpu_count,omitempty"`
 }
