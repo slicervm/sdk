@@ -19,10 +19,10 @@ type SlicerNode struct {
 type SlicerCreateNodeRequest struct {
 	RamGB      int      `json:"ram_gb"`
 	CPUs       int      `json:"cpus"`
+	Tags       []string `json:"tags,omitempty"`
 	ImportUser string   `json:"import_user"`
 	Userdata   string   `json:"userdata,omitempty"`
 	SSHKeys    []string `json:"ssh_keys,omitempty"`
-	Tags       []string `json:"tags,omitempty"`
 }
 
 // SlicerCreateNodeResponse is the response from the REST API when creating a node.
@@ -48,7 +48,7 @@ type SlicerHostGroup struct {
 	Name     string `json:"name"`
 	Count    int    `json:"count"`
 	RamGB    int    `json:"ram_gb"`
-	VCPU     int    `json:"vcpu"`
+	CPUs     int    `json:"cpus"`
 	Arch     string `json:"arch,omitempty"`
 	GPUCount int    `json:"gpu_count,omitempty"`
 }
