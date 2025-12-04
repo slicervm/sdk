@@ -164,3 +164,95 @@ func (c *SlicerClient) DeleteNode(groupName, nodeName string) error {
 
 	return nil
 }
+
+// ListSecrets retrieves all secrets.
+// Note: The actual secret data is not returned for security reasons.
+func (c *SlicerClient) ListSecrets() ([]Secret, error) {
+	res, err := c.makeRequest(http.MethodGet, "/secrets", nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list secrets: %w", err)
+	}
+
+	var body []byte
+	if res.Body != nil {
+		defer res.Body.Close()
+		body, _ = io.ReadAll(res.Body)
+	}
+
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API request failed: %s - %s", res.Status, string(body))
+	}
+
+	var secrets []Secret
+	if err := json.Unmarshal(body, &secrets); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return secrets, nil
+}
+
+// CreateSecret creates a new secret.
+// Returns an error if a secret with the same mame already exists or if creation fails.
+func (c *SlicerClient) CreateSecret(request CreateSecretRequest) error {
+	res, err := c.makeRequest(http.MethodPost, "/secrets", request)
+	if err != nil {
+		return fmt.Errorf("failed to create secret: %w", err)
+	}
+
+	var body []byte
+	if res.Body != nil {
+		defer res.Body.Close()
+		body, _ = io.ReadAll(res.Body)
+	}
+
+	if res.StatusCode != http.StatusCreated {
+		return fmt.Errorf("API request failed: %s - %s", res.Status, string(body))
+	}
+
+	return nil
+}
+
+// PatchSecret updates an existing secret with new data and/or metadata.
+// Only the fields provided in the UpdateSecretRequest will be modified.
+// Returns an error if the secret doesn't exist or if the update fails.
+func (c *SlicerClient) PatchSecret(secretName string, request UpdateSecretRequest) error {
+	endpoint := path.Join("/secrets", secretName)
+	res, err := c.makeRequest(http.MethodPatch, endpoint, request)
+	if err != nil {
+		return fmt.Errorf("failed to patch secret: %w", err)
+	}
+
+	var body []byte
+	if res.Body != nil {
+		defer res.Body.Close()
+		body, _ = io.ReadAll(res.Body)
+	}
+
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("API request failed: %s - %s", res.Status, string(body))
+	}
+
+	return nil
+}
+
+// DeleteSecret removes a secret.
+// Returns an error if the secret doesn't exist or if the deletion fails.
+func (c *SlicerClient) DeleteSecret(secretName string) error {
+	endpoint := path.Join("secrets", secretName)
+	res, err := c.makeRequest(http.MethodDelete, endpoint, nil)
+	if err != nil {
+		return fmt.Errorf("failed to delete secret: %w", err)
+	}
+
+	var body []byte
+	if res.Body != nil {
+		defer res.Body.Close()
+		body, _ = io.ReadAll(res.Body)
+	}
+
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("API request failed: %s - %s", res.Status, string(body))
+	}
+
+	return nil
+}
