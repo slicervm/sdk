@@ -19,7 +19,7 @@ func TestMakeRequest_AuthHeaderWithToken(t *testing.T) {
 	defer server.Close()
 
 	client := NewSlicerClient(server.URL, "test-token", "test-agent", nil)
-	resp, err := client.makeRequest(http.MethodGet, "/test", nil)
+	resp, err := client.makeJSONRequest(http.MethodGet, "/test", nil)
 
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
@@ -40,7 +40,7 @@ func TestMakeRequest_NoAuthHeaderWhenTokenEmpty(t *testing.T) {
 	defer server.Close()
 
 	client := NewSlicerClient(server.URL, "", "test-agent", nil)
-	resp, err := client.makeRequest(http.MethodGet, "/test", nil)
+	resp, err := client.makeJSONRequest(http.MethodGet, "/test", nil)
 
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
@@ -75,7 +75,7 @@ func TestMakeRequest_WithBody(t *testing.T) {
 
 	client := NewSlicerClient(server.URL, "token", "agent", nil)
 	requestBody := map[string]string{"name": "test", "value": "data"}
-	resp, err := client.makeRequest(http.MethodPost, "/test", requestBody)
+	resp, err := client.makeJSONRequest(http.MethodPost, "/test", requestBody)
 
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
@@ -107,7 +107,7 @@ func TestMakeRequest_WithoutBody(t *testing.T) {
 	defer server.Close()
 
 	client := NewSlicerClient(server.URL, "token", "agent", nil)
-	resp, err := client.makeRequest(http.MethodGet, "/test", nil)
+	resp, err := client.makeJSONRequest(http.MethodGet, "/test", nil)
 
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
@@ -122,7 +122,7 @@ func TestMakeRequest_InvalidJSON(t *testing.T) {
 
 	// Use a channel which can't be marshaled to JSON
 	invalidBody := make(chan int)
-	_, err := client.makeRequest(http.MethodPost, "/test", invalidBody)
+	_, err := client.makeJSONRequest(http.MethodPost, "/test", invalidBody)
 
 	if err == nil {
 		t.Error("Want error, got nil")
@@ -141,7 +141,7 @@ func TestMakeRequest_CustomUserAgent(t *testing.T) {
 	defer server.Close()
 
 	client := NewSlicerClient(server.URL, "token", customAgent, nil)
-	resp, err := client.makeRequest(http.MethodGet, "/test", nil)
+	resp, err := client.makeJSONRequest(http.MethodGet, "/test", nil)
 
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
@@ -153,7 +153,7 @@ func TestMakeRequest_CustomUserAgent(t *testing.T) {
 
 func TestMakeRequest_InvalidBaseURL(t *testing.T) {
 	client := NewSlicerClient("://invalid-url", "token", "agent", nil)
-	_, err := client.makeRequest(http.MethodGet, "/test", nil)
+	_, err := client.makeJSONRequest(http.MethodGet, "/test", nil)
 
 	if err == nil {
 		t.Error("Want error, got nil")

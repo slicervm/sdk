@@ -53,3 +53,24 @@ type SlicerHostGroup struct {
 	Arch     string `json:"arch,omitempty"`
 	GPUCount int    `json:"gpu_count,omitempty"`
 }
+
+// ExecWriteResult represents output from commands executing within a microVM.
+type SlicerExecWriteResult struct {
+	Stdout   string `json:"stdout,omitempty"`
+	Stderr   string `json:"stderr,omitempty"`
+	ExitCode int    `json:"exit_code,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
+// SlicerExecRequest contains parameters for invoking a command
+// within a VM.
+type SlicerExecRequest struct {
+	Command string   `json:"command,omitempty"`
+	Args    []string `json:"args,omitempty"`
+	UID     uint32   `json:"uid,omitempty"`
+	GID     uint32   `json:"gid,omitempty"`
+	Stdin   bool     `json:"stdin,omitempty"`
+	Stdout  bool     `json:"stdout,omitempty"`
+	Stderr  bool     `json:"stderr,omitempty"`
+	Shell   string   `json:"shell,omitempty"`
+}

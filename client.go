@@ -1,14 +1,18 @@
 package slicer
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
+	"strconv"
 )
 
 var (
@@ -37,8 +41,14 @@ func NewSlicerClient(baseURL, token string, userAgent string, httpClient *http.C
 	}
 }
 
-// makeRequest creates and executes an HTTP request with proper authentication
-func (c *SlicerClient) makeRequest(method, endpoint string, body interface{}) (*http.Response, error) {
+// makeJSONRequest creates and executes an HTTP request with proper authentication
+func (c *SlicerClient) makeJSONRequest(method, endpoint string, body interface{}) (*http.Response, error) {
+	ctx := context.Background()
+	return c.makeJSONRequestWithContext(ctx, method, endpoint, body)
+}
+
+// makeJSONRequest creates and executes an HTTP request with proper authentication
+func (c *SlicerClient) makeJSONRequestWithContext(ctx context.Context, method, endpoint string, body interface{}) (*http.Response, error) {
 	u, err := url.Parse(c.baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid base URL: %w", err)
@@ -54,7 +64,7 @@ func (c *SlicerClient) makeRequest(method, endpoint string, body interface{}) (*
 		reqBody = bytes.NewReader(jsonBody)
 	}
 
-	req, err := http.NewRequest(method, u.String(), reqBody)
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -74,8 +84,8 @@ func (c *SlicerClient) makeRequest(method, endpoint string, body interface{}) (*
 }
 
 // GetHostGroups fetches all host groups from the API
-func (c *SlicerClient) GetHostGroups() ([]SlicerHostGroup, error) {
-	res, err := c.makeRequest(http.MethodGet, "/hostgroup", nil)
+func (c *SlicerClient) GetHostGroups(ctx context.Context) ([]SlicerHostGroup, error) {
+	res, err := c.makeJSONRequestWithContext(ctx, http.MethodGet, "/hostgroup", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -99,9 +109,9 @@ func (c *SlicerClient) GetHostGroups() ([]SlicerHostGroup, error) {
 }
 
 // GetHostGroupNodes fetches nodes for a specific host group
-func (c *SlicerClient) GetHostGroupNodes(groupName string) ([]SlicerNode, error) {
+func (c *SlicerClient) GetHostGroupNodes(ctx context.Context, groupName string) ([]SlicerNode, error) {
 	endpoint := fmt.Sprintf("hostgroup/%s/nodes", groupName)
-	res, err := c.makeRequest(http.MethodGet, endpoint, nil)
+	res, err := c.makeJSONRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch nodes: %w", err)
 	}
@@ -125,9 +135,9 @@ func (c *SlicerClient) GetHostGroupNodes(groupName string) ([]SlicerNode, error)
 }
 
 // CreateNode creates a new node in the specified host group
-func (c *SlicerClient) CreateNode(groupName string, request SlicerCreateNodeRequest) (*SlicerCreateNodeResponse, error) {
+func (c *SlicerClient) CreateNode(ctx context.Context, groupName string, request SlicerCreateNodeRequest) (*SlicerCreateNodeResponse, error) {
 	endpoint := fmt.Sprintf("hostgroup/%s/nodes", groupName)
-	res, err := c.makeRequest(http.MethodPost, endpoint, request)
+	res, err := c.makeJSONRequestWithContext(ctx, http.MethodPost, endpoint, request)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create node: %w", err)
 	}
@@ -153,7 +163,7 @@ func (c *SlicerClient) CreateNode(groupName string, request SlicerCreateNodeRequ
 // DeleteNode deletes a node from the specified host group
 func (c *SlicerClient) DeleteNode(groupName, nodeName string) error {
 	endpoint := fmt.Sprintf("hostgroup/%s/nodes/%s", groupName, nodeName)
-	res, err := c.makeRequest(http.MethodDelete, endpoint, nil)
+	res, err := c.makeJSONRequest(http.MethodDelete, endpoint, nil)
 	if err != nil {
 		return fmt.Errorf("failed to delete node: %w", err)
 	}
@@ -173,8 +183,8 @@ func (c *SlicerClient) DeleteNode(groupName, nodeName string) error {
 
 // ListSecrets retrieves all secrets.
 // Note: The actual secret data is not returned for security reasons.
-func (c *SlicerClient) ListSecrets() ([]Secret, error) {
-	res, err := c.makeRequest(http.MethodGet, "/secrets", nil)
+func (c *SlicerClient) ListSecrets(ctx context.Context) ([]Secret, error) {
+	res, err := c.makeJSONRequestWithContext(ctx, http.MethodGet, "/secrets", nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list secrets: %w", err)
 	}
@@ -200,8 +210,8 @@ func (c *SlicerClient) ListSecrets() ([]Secret, error) {
 // CreateSecret creates a new secret.
 // Returns ErrSecretExists if a secret with the same name already exists.
 // An error is returned if creation fails.
-func (c *SlicerClient) CreateSecret(request CreateSecretRequest) error {
-	res, err := c.makeRequest(http.MethodPost, "/secrets", request)
+func (c *SlicerClient) CreateSecret(ctx context.Context, request CreateSecretRequest) error {
+	res, err := c.makeJSONRequestWithContext(ctx, http.MethodPost, "/secrets", request)
 	if err != nil {
 		return fmt.Errorf("failed to create secret: %w", err)
 	}
@@ -226,9 +236,9 @@ func (c *SlicerClient) CreateSecret(request CreateSecretRequest) error {
 // PatchSecret updates an existing secret with new data and/or metadata.
 // Only the fields provided in the UpdateSecretRequest will be modified.
 // Returns an error if the secret doesn't exist or if the update fails.
-func (c *SlicerClient) PatchSecret(secretName string, request UpdateSecretRequest) error {
+func (c *SlicerClient) PatchSecret(ctx context.Context, secretName string, request UpdateSecretRequest) error {
 	endpoint := path.Join("/secrets", secretName)
-	res, err := c.makeRequest(http.MethodPatch, endpoint, request)
+	res, err := c.makeJSONRequestWithContext(ctx, http.MethodPatch, endpoint, request)
 	if err != nil {
 		return fmt.Errorf("failed to patch secret: %w", err)
 	}
@@ -248,9 +258,9 @@ func (c *SlicerClient) PatchSecret(secretName string, request UpdateSecretReques
 
 // DeleteSecret removes a secret.
 // Returns an error if the secret doesn't exist or if the deletion fails.
-func (c *SlicerClient) DeleteSecret(secretName string) error {
+func (c *SlicerClient) DeleteSecret(ctx context.Context, secretName string) error {
 	endpoint := path.Join("secrets", secretName)
-	res, err := c.makeRequest(http.MethodDelete, endpoint, nil)
+	res, err := c.makeJSONRequestWithContext(ctx, http.MethodDelete, endpoint, nil)
 	if err != nil {
 		return fmt.Errorf("failed to delete secret: %w", err)
 	}
@@ -266,4 +276,129 @@ func (c *SlicerClient) DeleteSecret(secretName string) error {
 	}
 
 	return nil
+}
+
+// Exec executes a command on the specified node and streams the output.
+// The channel is unbuffered so the caller should read from it promptly to avoid blocking.
+func (c *SlicerClient) Exec(ctx context.Context, nodeName string, execReq SlicerExecRequest) (chan SlicerExecWriteResult, error) {
+
+	resChan := make(chan SlicerExecWriteResult)
+
+	command := execReq.Command
+	args := execReq.Args
+	uid := execReq.UID
+	gid := execReq.GID
+	shell := execReq.Shell
+	stdin := execReq.Stdin
+
+	q := url.Values{}
+	q.Set("cmd", command)
+
+	for _, arg := range args {
+		q.Add("args", arg)
+	}
+
+	q.Set("uid", strconv.FormatUint(uint64(uid), 10))
+	q.Set("gid", strconv.FormatUint(uint64(gid), 10))
+
+	var bodyReader io.Reader
+
+	if stdin {
+		q.Set("stdin", "true")
+		bodyReader = os.Stdin
+	}
+	if len(shell) > 0 {
+		q.Set("shell", shell)
+	}
+
+	u, err := url.Parse(c.baseURL)
+	if err != nil {
+		return resChan, fmt.Errorf("failed to parse API URL: %w", err)
+	}
+	u.Path = fmt.Sprintf("/vm/%s/exec", nodeName)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), bodyReader)
+	if err != nil {
+		return resChan, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+c.token)
+
+	req.URL.RawQuery = q.Encode()
+
+	res, err := c.httpClient.Do(req)
+	if err != nil {
+		return resChan, fmt.Errorf("failed to execute request: %w", err)
+	}
+
+	if res.StatusCode != http.StatusOK {
+		var body []byte
+		if res.Body != nil {
+			defer res.Body.Close()
+			body, _ = io.ReadAll(res.Body)
+		}
+		return resChan, fmt.Errorf("failed to execute command: %s %s", res.Status, string(body))
+	}
+
+	r := bufio.NewReader(res.Body)
+	go func() {
+
+		if res.Body != nil {
+			defer res.Body.Close()
+		}
+		defer close(resChan)
+
+		for {
+
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			line, err := r.ReadBytes('\n')
+			if err == io.EOF {
+				// AE: Potential missing data if line contains some text, but we still hit EOF
+				break
+			}
+
+			if err != nil {
+				resChan <- SlicerExecWriteResult{
+					Error: fmt.Sprintf("failed to read response: %v", err),
+				}
+				return
+			}
+
+			var result SlicerExecWriteResult
+			if err := json.Unmarshal(line, &result); err != nil {
+				resChan <- SlicerExecWriteResult{
+					Error: fmt.Sprintf("failed to decode response: %v", err),
+				}
+				return
+			}
+
+			if result.Error != "" {
+				resChan <- SlicerExecWriteResult{
+					Error:  fmt.Sprintf("failed to execute command: %s", result.Error),
+					Stdout: result.Stdout,
+					Stderr: result.Stderr,
+				}
+				return
+			}
+
+			if result.ExitCode != 0 {
+				resChan <- SlicerExecWriteResult{
+					Error:  fmt.Sprintf("failed to execute command: %d", result.ExitCode),
+					Stdout: result.Stdout,
+					Stderr: result.Stderr,
+				}
+				return
+			}
+
+			resChan <- result
+		}
+
+	}()
+
+	return resChan, nil
 }
