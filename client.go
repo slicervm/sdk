@@ -3,11 +3,17 @@ package slicer
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"path"
+)
+
+var (
+	// ErrSecretExists is an error returned when a secret with given name already exists.
+	ErrSecretExists = errors.New("secret already exists")
 )
 
 // SlicerClient handles all HTTP communication with the Slicer API
@@ -192,7 +198,8 @@ func (c *SlicerClient) ListSecrets() ([]Secret, error) {
 }
 
 // CreateSecret creates a new secret.
-// Returns an error if a secret with the same mame already exists or if creation fails.
+// Returns ErrSecretExists if a secret with the same name already exists.
+// An error is returned if creation fails.
 func (c *SlicerClient) CreateSecret(request CreateSecretRequest) error {
 	res, err := c.makeRequest(http.MethodPost, "/secrets", request)
 	if err != nil {
@@ -203,6 +210,10 @@ func (c *SlicerClient) CreateSecret(request CreateSecretRequest) error {
 	if res.Body != nil {
 		defer res.Body.Close()
 		body, _ = io.ReadAll(res.Body)
+	}
+
+	if res.StatusCode == http.StatusConflict {
+		return ErrSecretExists
 	}
 
 	if res.StatusCode != http.StatusCreated {
