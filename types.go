@@ -23,6 +23,7 @@ type SlicerCreateNodeRequest struct {
 	ImportUser string   `json:"import_user"`
 	Userdata   string   `json:"userdata,omitempty"`
 	SSHKeys    []string `json:"ssh_keys,omitempty"`
+	Secrets    []string `json:"secrets,omitempty"`
 }
 
 // SlicerCreateNodeResponse is the response from the REST API when creating a node.
