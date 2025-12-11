@@ -91,7 +91,8 @@ func StreamTarArchive(ctx context.Context, w io.Writer, parentDir, baseName stri
 
 // ExtractTarStream extracts a tar stream from r into extractDir.
 // This is a streaming implementation that doesn't buffer entire files in memory.
-func ExtractTarStream(ctx context.Context, r io.Reader, extractDir string) error {
+// If uid or gid are non-zero, files will be chowned to that uid/gid after creation.
+func ExtractTarStream(ctx context.Context, r io.Reader, extractDir string, uid, gid uint32) error {
 	// Get absolute path of extract directory for proper validation
 	absExtractDir, err := filepath.Abs(extractDir)
 	if err != nil {
@@ -157,6 +158,13 @@ func ExtractTarStream(ctx context.Context, r io.Reader, extractDir string) error
 			if err := os.MkdirAll(target, mode.Perm()); err != nil {
 				return fmt.Errorf("failed to create directory %s: %w", target, err)
 			}
+			// Set ownership if specified (skipped on Windows where Chown is not supported)
+			if uid > 0 || gid > 0 {
+				if err := os.Chown(target, int(uid), int(gid)); err != nil {
+					// On Windows, Chown always fails - this is expected and can be ignored
+					log.Printf("warning: failed to set ownership on directory %s: %v", target, err)
+				}
+			}
 			madeDir[target] = true
 
 		case tar.TypeReg, tar.TypeRegA:
@@ -200,6 +208,14 @@ func ExtractTarStream(ctx context.Context, r io.Reader, extractDir string) error
 				log.Printf("warning: failed to set permissions on %s: %v", target, err)
 			}
 
+			// Set ownership if specified (skipped on Windows where Chown is not supported)
+			if uid > 0 || gid > 0 {
+				if err := os.Chown(target, int(uid), int(gid)); err != nil {
+					// On Windows, Chown always fails - this is expected and can be ignored
+					log.Printf("warning: failed to set ownership on file %s: %v", target, err)
+				}
+			}
+
 			// Set modification time (clamp future times to prevent clock skew issues)
 			modTime := header.ModTime
 			if modTime.After(t0) {
@@ -225,6 +241,14 @@ func ExtractTarStream(ctx context.Context, r io.Reader, extractDir string) error
 			// Create symlink
 			if err := os.Symlink(header.Linkname, target); err != nil {
 				return fmt.Errorf("failed to create symlink %s -> %s: %w", target, header.Linkname, err)
+			}
+			// Set ownership if specified (chown on symlink affects the symlink itself)
+			// Skipped on Windows where Chown is not supported
+			if uid > 0 || gid > 0 {
+				if err := os.Lchown(target, int(uid), int(gid)); err != nil {
+					// On Windows, Lchown always fails - this is expected and can be ignored
+					log.Printf("warning: failed to set ownership on symlink %s: %v", target, err)
+				}
 			}
 			// Set modification time on symlink (skip if it fails - symlink target might not exist)
 			if !header.ModTime.IsZero() {
@@ -257,6 +281,13 @@ func ExtractTarStream(ctx context.Context, r io.Reader, extractDir string) error
 			if err := os.Link(linkTarget, target); err != nil {
 				return fmt.Errorf("failed to create hard link %s -> %s: %w", target, header.Linkname, err)
 			}
+			// Set ownership if specified (skipped on Windows where Chown is not supported)
+			if uid > 0 || gid > 0 {
+				if err := os.Chown(target, int(uid), int(gid)); err != nil {
+					// On Windows, Chown always fails - this is expected and can be ignored
+					log.Printf("warning: failed to set ownership on hard link %s: %v", target, err)
+				}
+			}
 			// Set modification time on hard link
 			if !header.ModTime.IsZero() {
 				if err := os.Chtimes(target, header.ModTime, header.ModTime); err != nil {
@@ -288,7 +319,8 @@ func ValidRelPath(p string) bool {
 // ExtractTarToPath extracts a tar stream to a local path with proper renaming logic.
 // This handles the cp-like behavior of renaming files/directories and moving contents
 // into existing directories.
-func ExtractTarToPath(ctx context.Context, r io.Reader, dest string) error {
+// If uid or gid are non-zero, files will be chowned to that uid/gid after creation.
+func ExtractTarToPath(ctx context.Context, r io.Reader, dest string, uid, gid uint32) error {
 	// Check if destination exists and what type it is
 	destInfo, err := os.Stat(dest)
 	destExists := err == nil
@@ -347,7 +379,7 @@ func ExtractTarToPath(ctx context.Context, r io.Reader, dest string) error {
 	}
 
 	// Extract tar stream using Go's archive/tar package
-	if err := ExtractTarStream(ctx, r, extractDir); err != nil {
+	if err := ExtractTarStream(ctx, r, extractDir, uid, gid); err != nil {
 		return fmt.Errorf("failed to extract tar: %w", err)
 	}
 

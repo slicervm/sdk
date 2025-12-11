@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/user"
 	"path"
 	"path/filepath"
 	"strconv"
@@ -408,7 +409,8 @@ func (c *SlicerClient) Exec(ctx context.Context, nodeName string, execReq Slicer
 // CpToVM copies files from a local path to a VM path.
 // The localPath can be a file or directory. The tar stream is created
 // internally and sent to the VM.
-func (c *SlicerClient) CpToVM(ctx context.Context, vmName, localPath, vmPath string) error {
+// uid and gid specify the ownership for extracted files (0 means use default).
+func (c *SlicerClient) CpToVM(ctx context.Context, vmName, localPath, vmPath string, uid, gid uint32) error {
 	// Get absolute path to handle symlinks correctly
 	absSrc, err := filepath.Abs(localPath)
 	if err != nil {
@@ -439,6 +441,12 @@ func (c *SlicerClient) CpToVM(ctx context.Context, vmName, localPath, vmPath str
 	// Make HTTP request
 	q := url.Values{}
 	q.Set("path", vmPath)
+	if uid > 0 {
+		q.Set("uid", strconv.FormatUint(uint64(uid), 10))
+	}
+	if gid > 0 {
+		q.Set("gid", strconv.FormatUint(uint64(gid), 10))
+	}
 
 	u, err := url.Parse(c.baseURL)
 	if err != nil {
@@ -485,7 +493,9 @@ func (c *SlicerClient) CpToVM(ctx context.Context, vmName, localPath, vmPath str
 // CpFromVM copies files from a VM path to a local path.
 // The tar stream is received from the VM and extracted to localPath
 // with proper renaming logic (supports renaming files/directories).
-func (c *SlicerClient) CpFromVM(ctx context.Context, vmName, vmPath, localPath string) error {
+// If uid or gid are 0, the current user's UID/GID will be used.
+// On Windows, chown operations are skipped (uid/gid are ignored).
+func (c *SlicerClient) CpFromVM(ctx context.Context, vmName, vmPath, localPath string, uid, gid uint32) error {
 	// Make HTTP request to get tar stream
 	q := url.Values{}
 	q.Set("path", vmPath)
@@ -523,8 +533,21 @@ func (c *SlicerClient) CpFromVM(ctx context.Context, vmName, vmPath, localPath s
 		return fmt.Errorf("failed to copy from VM: %s: %s", res.Status, string(body))
 	}
 
+	// Get current user's UID/GID if not specified
+	// On Windows, this will be 0,0 and chown will be skipped
+	if uid == 0 && gid == 0 {
+		if currentUser, err := user.Current(); err == nil {
+			if parsedUID, err := strconv.ParseUint(currentUser.Uid, 10, 32); err == nil {
+				uid = uint32(parsedUID)
+			}
+			if parsedGID, err := strconv.ParseUint(currentUser.Gid, 10, 32); err == nil {
+				gid = uint32(parsedGID)
+			}
+		}
+	}
+
 	// Extract tar stream to local path with renaming logic
-	return ExtractTarToPath(ctx, res.Body, localPath)
+	return ExtractTarToPath(ctx, res.Body, localPath, uid, gid)
 }
 
 // GetVMStats fetches stats for all VMs or a specific VM if hostname is provided.
