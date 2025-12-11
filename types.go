@@ -74,3 +74,9 @@ type SlicerExecRequest struct {
 	Stderr  bool     `json:"stderr,omitempty"`
 	Shell   string   `json:"shell,omitempty"`
 }
+
+// SlicerCpRequest contains parameters for copying files to/from a VM
+type SlicerCpRequest struct {
+	VM   string // VM name
+	Path string // Path on the VM
+}
