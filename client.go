@@ -14,6 +14,7 @@ import (
 	"path"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 var (
@@ -524,4 +525,244 @@ func (c *SlicerClient) CpFromVM(ctx context.Context, vmName, vmPath, localPath s
 
 	// Extract tar stream to local path with renaming logic
 	return ExtractTarToPath(ctx, res.Body, localPath)
+}
+
+// GetVMStats fetches stats for all VMs or a specific VM if hostname is provided.
+// If hostname is empty, returns stats for all VMs.
+func (c *SlicerClient) GetVMStats(ctx context.Context, hostname string) ([]SlicerNodeStat, error) {
+	u, err := url.Parse(c.baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse API URL: %w", err)
+	}
+
+	if hostname != "" {
+		u.Path = fmt.Sprintf("/node/%s/stats", hostname)
+	} else {
+		u.Path = "/nodes/stats"
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	if c.userAgent != "" {
+		req.Header.Set("User-Agent", c.userAgent)
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	res, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to perform GET request: %w", err)
+	}
+	defer res.Body.Close()
+
+	var body []byte
+	if res.Body != nil {
+		body, _ = io.ReadAll(res.Body)
+	}
+
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("status %s: %s", res.Status, strings.TrimSpace(string(body)))
+	}
+
+	var stats []SlicerNodeStat
+	if err := json.NewDecoder(bytes.NewBuffer(body)).Decode(&stats); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return stats, nil
+}
+
+// GetVMLogs fetches logs for a specific VM
+func (c *SlicerClient) GetVMLogs(ctx context.Context, hostname string, lines int) (*SlicerLogsResponse, error) {
+	u, err := url.Parse(c.baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse API URL: %w", err)
+	}
+
+	u.Path = fmt.Sprintf("/vm/%s/logs", hostname)
+	if lines >= 0 {
+		q := url.Values{}
+		q.Set("lines", strconv.Itoa(lines))
+		u.RawQuery = q.Encode()
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	if c.userAgent != "" {
+		req.Header.Set("User-Agent", c.userAgent)
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	res, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch logs: %w", err)
+	}
+	defer res.Body.Close()
+
+	var body []byte
+	if res.Body != nil {
+		body, _ = io.ReadAll(res.Body)
+	}
+
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("status %s: %s", res.Status, strings.TrimSpace(string(body)))
+	}
+
+	var logsRes SlicerLogsResponse
+	if err := json.NewDecoder(bytes.NewBuffer(body)).Decode(&logsRes); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &logsRes, nil
+}
+
+// ListVMs fetches all VMs (nodes)
+func (c *SlicerClient) ListVMs(ctx context.Context) ([]SlicerNode, error) {
+	u, err := url.Parse(c.baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse API URL: %w", err)
+	}
+
+	u.Path = "/nodes"
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	if c.userAgent != "" {
+		req.Header.Set("User-Agent", c.userAgent)
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	res, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch VMs: %w", err)
+	}
+	defer res.Body.Close()
+
+	var body []byte
+	if res.Body != nil {
+		body, _ = io.ReadAll(res.Body)
+	}
+
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("status %s: %s", res.Status, strings.TrimSpace(string(body)))
+	}
+
+	var nodes []SlicerNode
+	if err := json.NewDecoder(bytes.NewBuffer(body)).Decode(&nodes); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return nodes, nil
+}
+
+// DeleteVM deletes a VM from a host group
+func (c *SlicerClient) DeleteVM(ctx context.Context, groupName, hostname string) (*SlicerDeleteResponse, error) {
+	u, err := url.Parse(c.baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse API URL: %w", err)
+	}
+
+	u.Path = fmt.Sprintf("/hostgroup/%s/nodes/%s", groupName, hostname)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, u.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	if c.userAgent != "" {
+		req.Header.Set("User-Agent", c.userAgent)
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	res, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to delete VM: %w", err)
+	}
+	defer res.Body.Close()
+
+	var body []byte
+	if res.Body != nil {
+		body, _ = io.ReadAll(res.Body)
+	}
+
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("status %s: %s", res.Status, strings.TrimSpace(string(body)))
+	}
+
+	var delResp SlicerDeleteResponse
+	if err := json.NewDecoder(bytes.NewBuffer(body)).Decode(&delResp); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	if delResp.Error != "" {
+		return nil, fmt.Errorf("%s", delResp.Error)
+	}
+
+	return &delResp, nil
+}
+
+// CreateVM creates a new VM in a host group
+func (c *SlicerClient) CreateVM(ctx context.Context, groupName string, request SlicerCreateVMRequest) (*SlicerCreateNodeResponse, error) {
+	u, err := url.Parse(c.baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse API URL: %w", err)
+	}
+
+	u.Path = fmt.Sprintf("/hostgroup/%s/nodes", groupName)
+
+	jsonBody, err := json.Marshal(request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	if c.userAgent != "" {
+		req.Header.Set("User-Agent", c.userAgent)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	res, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create VM: %w", err)
+	}
+	defer res.Body.Close()
+
+	var body []byte
+	if res.Body != nil {
+		body, _ = io.ReadAll(res.Body)
+	}
+
+	if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusCreated {
+		return nil, fmt.Errorf("status %s: %s", res.Status, strings.TrimSpace(string(body)))
+	}
+
+	var created SlicerCreateNodeResponse
+	if err := json.NewDecoder(bytes.NewBuffer(body)).Decode(&created); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &created, nil
 }
