@@ -294,6 +294,8 @@ func (c *SlicerClient) Exec(ctx context.Context, nodeName string, execReq Slicer
 	shell := execReq.Shell
 	stdin := execReq.Stdin
 
+	cwd := execReq.Cwd
+
 	q := url.Values{}
 	q.Set("cmd", command)
 
@@ -303,6 +305,14 @@ func (c *SlicerClient) Exec(ctx context.Context, nodeName string, execReq Slicer
 
 	q.Set("uid", strconv.FormatUint(uint64(uid), 10))
 	q.Set("gid", strconv.FormatUint(uint64(gid), 10))
+
+	if len(cwd) > 0 {
+		q.Set("cwd", cwd)
+	}
+
+	if len(execReq.Permissions) > 0 {
+		q.Set("permissions", execReq.Permissions)
+	}
 
 	var bodyReader io.Reader
 

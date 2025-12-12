@@ -65,14 +65,16 @@ type SlicerExecWriteResult struct {
 // SlicerExecRequest contains parameters for invoking a command
 // within a VM.
 type SlicerExecRequest struct {
-	Command string   `json:"command,omitempty"`
-	Args    []string `json:"args,omitempty"`
-	UID     uint32   `json:"uid,omitempty"`
-	GID     uint32   `json:"gid,omitempty"`
-	Stdin   bool     `json:"stdin,omitempty"`
-	Stdout  bool     `json:"stdout,omitempty"`
-	Stderr  bool     `json:"stderr,omitempty"`
-	Shell   string   `json:"shell,omitempty"`
+	Command     string   `json:"command,omitempty"`
+	Args        []string `json:"args,omitempty"`
+	UID         uint32   `json:"uid,omitempty"`
+	GID         uint32   `json:"gid,omitempty"`
+	Stdin       bool     `json:"stdin,omitempty"`
+	Stdout      bool     `json:"stdout,omitempty"`
+	Stderr      bool     `json:"stderr,omitempty"`
+	Shell       string   `json:"shell,omitempty"`
+	Cwd         string   `json:"cwd,omitempty"`
+	Permissions string   `json:"permissions,omitempty"`
 }
 
 // SlicerCpRequest contains parameters for copying files to/from a VM
@@ -83,11 +85,11 @@ type SlicerCpRequest struct {
 
 // SlicerNodeStat represents stats for a VM node
 type SlicerNodeStat struct {
-	Hostname  string    `json:"hostname"`
-	IP        string    `json:"ip"`
-	CreatedAt time.Time `json:"created_at"`
+	Hostname  string          `json:"hostname"`
+	IP        string          `json:"ip"`
+	CreatedAt time.Time       `json:"created_at"`
 	Snapshot  *SlicerSnapshot `json:"snapshot"`
-	Error     string    `json:"error"`
+	Error     string          `json:"error"`
 }
 
 // SlicerSnapshot represents a snapshot of VM metrics
