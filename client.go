@@ -353,16 +353,17 @@ func (c *SlicerClient) Exec(ctx context.Context, nodeName string, execReq Slicer
 		return resChan, fmt.Errorf("failed to execute command: %s %s", res.Status, string(body))
 	}
 
-	r := bufio.NewReader(res.Body)
-	go func() {
+	if res.Body == nil {
+		return resChan, fmt.Errorf("no body received from VM")
+	}
 
-		if res.Body != nil {
-			defer res.Body.Close()
-		}
+	go func() {
+		r := bufio.NewReader(res.Body)
+
+		defer res.Body.Close()
 		defer close(resChan)
 
 		for {
-
 			select {
 			case <-ctx.Done():
 				return
