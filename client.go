@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var (
@@ -376,7 +377,8 @@ func (c *SlicerClient) Exec(ctx context.Context, nodeName string, execReq Slicer
 
 			if err != nil {
 				resChan <- SlicerExecWriteResult{
-					Error: fmt.Sprintf("failed to read response: %v", err),
+					Timestamp: time.Now(),
+					Error:     fmt.Sprintf("failed to read response: %v", err),
 				}
 				return
 			}
@@ -384,25 +386,28 @@ func (c *SlicerClient) Exec(ctx context.Context, nodeName string, execReq Slicer
 			var result SlicerExecWriteResult
 			if err := json.Unmarshal(line, &result); err != nil {
 				resChan <- SlicerExecWriteResult{
-					Error: fmt.Sprintf("failed to decode response: %v", err),
+					Timestamp: result.Timestamp,
+					Error:     fmt.Sprintf("failed to decode response: %v", err),
 				}
 				return
 			}
 
 			if result.Error != "" {
 				resChan <- SlicerExecWriteResult{
-					Error:  fmt.Sprintf("failed to execute command: %s", result.Error),
-					Stdout: result.Stdout,
-					Stderr: result.Stderr,
+					Timestamp: result.Timestamp,
+					Error:     fmt.Sprintf("failed to execute command: %s", result.Error),
+					Stdout:    result.Stdout,
+					Stderr:    result.Stderr,
 				}
 				return
 			}
 
 			if result.ExitCode != 0 {
 				resChan <- SlicerExecWriteResult{
-					Error:  fmt.Sprintf("failed to execute command: %d", result.ExitCode),
-					Stdout: result.Stdout,
-					Stderr: result.Stderr,
+					Timestamp: result.Timestamp,
+					Error:     fmt.Sprintf("failed to execute command: %d", result.ExitCode),
+					Stdout:    result.Stdout,
+					Stderr:    result.Stderr,
 				}
 				return
 			}

@@ -56,10 +56,11 @@ type SlicerHostGroup struct {
 
 // ExecWriteResult represents output from commands executing within a microVM.
 type SlicerExecWriteResult struct {
-	Stdout   string `json:"stdout,omitempty"`
-	Stderr   string `json:"stderr,omitempty"`
-	ExitCode int    `json:"exit_code,omitempty"`
-	Error    string `json:"error,omitempty"`
+	Timestamp time.Time `json:"timestamp"`
+	Stdout    string    `json:"stdout,omitempty"`
+	Stderr    string    `json:"stderr,omitempty"`
+	ExitCode  int       `json:"exit_code,omitempty"`
+	Error     string    `json:"error,omitempty"`
 }
 
 // SlicerExecRequest contains parameters for invoking a command
