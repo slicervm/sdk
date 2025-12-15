@@ -273,8 +273,11 @@ func copyFromVMBinary(ctx context.Context, c *SlicerClient, vmName, vmPath, loca
 		return fmt.Errorf("failed to copy from VM: %s: %s", res.Status, string(body))
 	}
 
-	_, err = io.Copy(f, res.Body)
-	if err != nil {
+	if res.Body == nil {
+		return fmt.Errorf("no body received from VM")
+	}
+
+	if _, err = io.Copy(f, res.Body); err != nil {
 		return fmt.Errorf("failed to write to local file: %w", err)
 	}
 
