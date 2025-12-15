@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/user"
 	"path"
 	"path/filepath"
 	"strconv"
@@ -420,7 +419,7 @@ func (c *SlicerClient) Exec(ctx context.Context, nodeName string, execReq Slicer
 // The localPath can be a file or directory. The tar stream is created
 // internally and sent to the VM.
 // uid and gid specify the ownership for extracted files (0 means use default).
-func (c *SlicerClient) CpToVM(ctx context.Context, vmName, localPath, vmPath string, uid, gid uint32) error {
+func (c *SlicerClient) CpToVM(ctx context.Context, vmName, localPath, vmPath string, uid, gid uint32, permissions, mode string) error {
 	// Get absolute path to handle symlinks correctly
 	absSrc, err := filepath.Abs(localPath)
 	if err != nil {
@@ -432,69 +431,17 @@ func (c *SlicerClient) CpToVM(ctx context.Context, vmName, localPath, vmPath str
 		return fmt.Errorf("source does not exist: %w", err)
 	}
 
-	// Use parentDir and baseName to strip leading paths (like cp)
-	parentDir := filepath.Dir(absSrc)
-	baseName := filepath.Base(absSrc)
-
-	// Create a pipe to stream tar data
-	pr, pw := io.Pipe()
-	defer pr.Close() // Close reader when function returns
-
-	// Stream tar in a goroutine
-	go func() {
-		defer pw.Close()
-		if err := StreamTarArchive(ctx, pw, parentDir, baseName); err != nil {
-			pw.CloseWithError(fmt.Errorf("failed to stream tar: %w", err))
+	switch mode {
+	default:
+		return fmt.Errorf("invalid mode: %s", mode)
+	case "tar":
+		if err := copyToVMTar(ctx, c, absSrc, vmName, vmPath, uid, gid, permissions); err != nil {
+			return err
 		}
-	}()
-
-	// Make HTTP request
-	q := url.Values{}
-	q.Set("path", vmPath)
-	if uid > 0 {
-		q.Set("uid", strconv.FormatUint(uint64(uid), 10))
-	}
-	if gid > 0 {
-		q.Set("gid", strconv.FormatUint(uint64(gid), 10))
-	}
-
-	u, err := url.Parse(c.baseURL)
-	if err != nil {
-		return fmt.Errorf("failed to parse API URL: %w", err)
-	}
-
-	u.Path = fmt.Sprintf("/vm/%s/cp", vmName)
-	u.RawQuery = q.Encode()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), pr)
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	if c.userAgent != "" {
-		req.Header.Set("User-Agent", c.userAgent)
-	}
-	req.Header.Set("Content-Type", "application/x-tar")
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
-
-	res, err := c.httpClient.Do(req)
-
-	if err != nil {
-		return fmt.Errorf("failed to perform POST request: %w", err)
-	}
-
-	if res.Body != nil {
-		defer res.Body.Close()
-	}
-
-	if res.StatusCode != http.StatusOK {
-		var body []byte
-		if res.Body != nil {
-			body, _ = io.ReadAll(res.Body)
+	case "binary":
+		if err := copyToVMBinary(ctx, c, absSrc, vmName, vmPath, uid, gid, permissions); err != nil {
+			return err
 		}
-		return fmt.Errorf("failed to copy to VM: %s: %s", res.Status, string(body))
 	}
 
 	return nil
@@ -505,59 +452,17 @@ func (c *SlicerClient) CpToVM(ctx context.Context, vmName, localPath, vmPath str
 // with proper renaming logic (supports renaming files/directories).
 // If uid or gid are 0, the current user's UID/GID will be used.
 // On Windows, chown operations are skipped (uid/gid are ignored).
-func (c *SlicerClient) CpFromVM(ctx context.Context, vmName, vmPath, localPath string, uid, gid uint32) error {
-	// Make HTTP request to get tar stream
-	q := url.Values{}
-	q.Set("path", vmPath)
+func (c *SlicerClient) CpFromVM(ctx context.Context, vmName, vmPath, localPath string, uid, gid uint32, permissions, mode string) error {
 
-	u, err := url.Parse(c.baseURL)
-	if err != nil {
-		return fmt.Errorf("failed to parse API URL: %w", err)
-	}
-	u.Path = fmt.Sprintf("/vm/%s/cp", vmName)
-	u.RawQuery = q.Encode()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+	switch mode {
+	default:
+		return fmt.Errorf("invalid mode: %s", mode)
+	case "tar":
+		return copyFromVMTar(ctx, c, vmName, vmPath, localPath, uid, gid, permissions)
+	case "binary":
+		return copyFromVMBinary(ctx, c, vmName, vmPath, localPath, uid, gid, permissions)
 	}
 
-	if c.userAgent != "" {
-		req.Header.Set("User-Agent", c.userAgent)
-	}
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
-
-	res, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to perform GET request: %w", err)
-	}
-	defer res.Body.Close()
-
-	if res.StatusCode != http.StatusOK {
-		var body []byte
-		if res.Body != nil {
-			body, _ = io.ReadAll(res.Body)
-		}
-		return fmt.Errorf("failed to copy from VM: %s: %s", res.Status, string(body))
-	}
-
-	// Get current user's UID/GID if not specified
-	// On Windows, this will be 0,0 and chown will be skipped
-	if uid == 0 && gid == 0 {
-		if currentUser, err := user.Current(); err == nil {
-			if parsedUID, err := strconv.ParseUint(currentUser.Uid, 10, 32); err == nil {
-				uid = uint32(parsedUID)
-			}
-			if parsedGID, err := strconv.ParseUint(currentUser.Gid, 10, 32); err == nil {
-				gid = uint32(parsedGID)
-			}
-		}
-	}
-
-	// Extract tar stream to local path with renaming logic
-	return ExtractTarToPath(ctx, res.Body, localPath, uid, gid)
 }
 
 // GetVMStats fetches stats for all VMs or a specific VM if hostname is provided.
