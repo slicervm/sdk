@@ -158,7 +158,7 @@ func copyToVMTar(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath st
 	return nil
 }
 
-func copyFromVMTar(ctx context.Context, c *SlicerClient, vmName, vmPath, localPath string, uid, gid uint32, permissions string) error {
+func copyFromVMTar(ctx context.Context, c *SlicerClient, vmName, vmPath, localPath string, uid, gid uint32) error {
 
 	q := url.Values{}
 	q.Set("path", vmPath)
@@ -213,12 +213,20 @@ func copyFromVMTar(ctx context.Context, c *SlicerClient, vmName, vmPath, localPa
 
 	// Extract tar stream to local path with renaming logic
 	return ExtractTarToPath(ctx, res.Body, localPath, uid, gid)
-
 }
 
 func copyFromVMBinary(ctx context.Context, c *SlicerClient, vmName, vmPath, localPath string, uid, gid uint32, permissions string) error {
 
-	f, err := os.Create(localPath)
+	fileMode := os.FileMode(0600)
+	if len(permissions) > 0 {
+		permUint, err := strconv.ParseUint(permissions, 8, 32)
+		if err != nil {
+			return fmt.Errorf("invalid permissions format: %w", err)
+		}
+		fileMode = os.FileMode(permUint)
+	}
+
+	f, err := os.OpenFile(localPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, fileMode)
 	if err != nil {
 		return fmt.Errorf("failed to create local file: %w", err)
 	}
@@ -234,10 +242,6 @@ func copyFromVMBinary(ctx context.Context, c *SlicerClient, vmName, vmPath, loca
 	q.Set("path", vmPath)
 	q.Set("uid", strconv.FormatUint(uint64(uid), 10))
 	q.Set("gid", strconv.FormatUint(uint64(gid), 10))
-
-	if len(permissions) > 0 {
-		q.Set("permissions", permissions)
-	}
 
 	u.RawQuery = q.Encode()
 
