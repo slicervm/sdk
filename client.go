@@ -710,3 +710,59 @@ func (c *SlicerClient) CreateVM(ctx context.Context, groupName string, request S
 
 	return &created, nil
 }
+
+// GetAgentHealth fetches the health of the agent
+// If includeStats is true, the response will include statistics about the system and agent.
+func (c *SlicerClient) GetAgentHealth(ctx context.Context, hostname string, includeStats bool) (*SlicerAgentHealthResponse, error) {
+	u, err := url.Parse(c.baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse API URL: %w", err)
+	}
+
+	u.Path = fmt.Sprintf("/vm/%s/health", hostname)
+
+	method := http.MethodGet
+	if !includeStats {
+		method = http.MethodHead
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	if c.userAgent != "" {
+		req.Header.Set("User-Agent", c.userAgent)
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	res, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch agent health: %w", err)
+	}
+	defer res.Body.Close()
+
+	var body []byte
+	if res.Body != nil {
+		body, _ = io.ReadAll(res.Body)
+	}
+
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("status %s: %s", res.Status, strings.TrimSpace(string(body)))
+	}
+
+	if !includeStats {
+		return &SlicerAgentHealthResponse{
+			Hostname: hostname,
+		}, nil
+	}
+
+	var healthResp SlicerAgentHealthResponse
+	if err := json.NewDecoder(bytes.NewBuffer(body)).Decode(&healthResp); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &healthResp, nil
+}
