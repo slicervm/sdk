@@ -12,8 +12,31 @@ import (
 	"strconv"
 )
 
-func copyToVMBinary(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath string, uid, gid uint32, permissions string) error {
+// getCurrentUIDGID returns the current user's UID and GID.
+// On Windows, returns 0,0 (chown operations will be skipped).
+func getCurrentUIDGID() (uid, gid uint32) {
+	if currentUser, err := user.Current(); err == nil {
+		if parsedUID, err := strconv.ParseUint(currentUser.Uid, 10, 32); err == nil {
+			uid = uint32(parsedUID)
+		}
+		if parsedGID, err := strconv.ParseUint(currentUser.Gid, 10, 32); err == nil {
+			gid = uint32(parsedGID)
+		}
+	}
+	return uid, gid
+}
 
+// setAuthHeaders sets User-Agent and Authorization headers on the request.
+func (c *SlicerClient) setAuthHeaders(req *http.Request) {
+	if c.userAgent != "" {
+		req.Header.Set("User-Agent", c.userAgent)
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+}
+
+func copyToVMBinary(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath string, uid, gid uint32, permissions string) error {
 	u, err := url.Parse(c.baseURL)
 	if err != nil {
 		return fmt.Errorf("failed to parse API URL: %w", err)
@@ -23,17 +46,8 @@ func copyToVMBinary(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath
 	q := url.Values{}
 	q.Set("path", vmPath)
 
-	// Get current user's UID/GID if not specified
-	// On Windows, this will be 0,0 and chown will be skipped
 	if uid == 0 && gid == 0 {
-		if currentUser, err := user.Current(); err == nil {
-			if parsedUID, err := strconv.ParseUint(currentUser.Uid, 10, 32); err == nil {
-				uid = uint32(parsedUID)
-			}
-			if parsedGID, err := strconv.ParseUint(currentUser.Gid, 10, 32); err == nil {
-				gid = uint32(parsedGID)
-			}
-		}
+		uid, gid = getCurrentUIDGID()
 	}
 
 	q.Set("uid", strconv.FormatUint(uint64(uid), 10))
@@ -57,13 +71,7 @@ func copyToVMBinary(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath
 	}
 
 	req.Header.Set("Content-Type", "application/octet-stream")
-
-	if c.userAgent != "" {
-		req.Header.Set("User-Agent", c.userAgent)
-	}
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
+	c.setAuthHeaders(req)
 
 	res, err := c.httpClient.Do(req)
 	if err != nil {
@@ -80,20 +88,15 @@ func copyToVMBinary(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath
 	}
 
 	return nil
-
 }
 
 func copyToVMTar(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath string, uid, gid uint32, permissions string) error {
-
-	// Use parentDir and baseName to strip leading paths (like cp)
 	parentDir := filepath.Dir(absSrc)
 	baseName := filepath.Base(absSrc)
 
-	// Create a pipe to stream tar data
 	pr, pw := io.Pipe()
-	defer pr.Close() // Close reader when function returns
+	defer pr.Close()
 
-	// Stream tar in a goroutine
 	go func() {
 		defer pw.Close()
 		if err := StreamTarArchive(ctx, pw, parentDir, baseName); err != nil {
@@ -101,7 +104,6 @@ func copyToVMTar(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath st
 		}
 	}()
 
-	// Make HTTP request
 	q := url.Values{}
 	q.Set("path", vmPath)
 	if uid > 0 {
@@ -110,7 +112,6 @@ func copyToVMTar(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath st
 	if gid > 0 {
 		q.Set("gid", strconv.FormatUint(uint64(gid), 10))
 	}
-
 	if len(permissions) > 0 {
 		q.Set("permissions", permissions)
 	}
@@ -129,14 +130,7 @@ func copyToVMTar(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath st
 	}
 
 	req.Header.Set("Content-Type", "application/x-tar")
-
-	if c.userAgent != "" {
-		req.Header.Set("User-Agent", c.userAgent)
-	}
-
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
+	c.setAuthHeaders(req)
 
 	res, err := c.httpClient.Do(req)
 	if err != nil {
@@ -159,7 +153,6 @@ func copyToVMTar(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath st
 }
 
 func copyFromVMTar(ctx context.Context, c *SlicerClient, vmName, vmPath, localPath string, uid, gid uint32) error {
-
 	q := url.Values{}
 	q.Set("path", vmPath)
 
@@ -176,13 +169,7 @@ func copyFromVMTar(ctx context.Context, c *SlicerClient, vmName, vmPath, localPa
 	}
 
 	req.Header.Set("Accept", "application/x-tar")
-
-	if c.userAgent != "" {
-		req.Header.Set("User-Agent", c.userAgent)
-	}
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
+	c.setAuthHeaders(req)
 
 	res, err := c.httpClient.Do(req)
 	if err != nil {
@@ -201,22 +188,13 @@ func copyFromVMTar(ctx context.Context, c *SlicerClient, vmName, vmPath, localPa
 	// Get current user's UID/GID if not specified
 	// On Windows, this will be 0,0 and chown will be skipped
 	if uid == 0 && gid == 0 {
-		if currentUser, err := user.Current(); err == nil {
-			if parsedUID, err := strconv.ParseUint(currentUser.Uid, 10, 32); err == nil {
-				uid = uint32(parsedUID)
-			}
-			if parsedGID, err := strconv.ParseUint(currentUser.Gid, 10, 32); err == nil {
-				gid = uint32(parsedGID)
-			}
-		}
+		uid, gid = getCurrentUIDGID()
 	}
 
-	// Extract tar stream to local path with renaming logic
 	return ExtractTarToPath(ctx, res.Body, localPath, uid, gid)
 }
 
 func copyFromVMBinary(ctx context.Context, c *SlicerClient, vmName, vmPath, localPath string, uid, gid uint32, permissions string) error {
-
 	fileMode := os.FileMode(0600)
 	if len(permissions) > 0 {
 		permUint, err := strconv.ParseUint(permissions, 8, 32)
@@ -250,14 +228,8 @@ func copyFromVMBinary(ctx context.Context, c *SlicerClient, vmName, vmPath, loca
 		return fmt.Errorf("failed to create request: %w", err)
 	}
 
-	if c.userAgent != "" {
-		req.Header.Set("User-Agent", c.userAgent)
-	}
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
-
 	req.Header.Set("Accept", "application/octet-stream")
+	c.setAuthHeaders(req)
 
 	res, err := c.httpClient.Do(req)
 	if err != nil {
