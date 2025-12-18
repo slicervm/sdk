@@ -64,7 +64,7 @@ func (n *SlicerCreateNodeResponse) IPAddress() net.IP {
 type SlicerHostGroup struct {
 	Name     string `json:"name,omitempty"`
 	Count    int    `json:"count,omitempty"`
-	RamBytes int    `json:"ram_bytes,omitempty"`
+	RamBytes int64  `json:"ram_bytes,omitempty"` // RAM size in bytes
 	CPUs     int    `json:"cpus,omitempty"`
 	Arch     string `json:"arch,omitempty"`
 	GPUCount int    `json:"gpu_count,omitempty"`
