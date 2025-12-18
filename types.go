@@ -10,6 +10,8 @@ import (
 type SlicerNode struct {
 	Hostname  string    `json:"hostname"`
 	IP        string    `json:"ip"`
+	RamBytes  int64     `json:"ram_bytes,omitempty"` // RAM size in bytes
+	CPUs      int       `json:"cpus,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	Arch      string    `json:"arch,omitempty"`
 	Tags      []string  `json:"tags,omitempty"`
@@ -17,13 +19,23 @@ type SlicerNode struct {
 
 // SlicerCreateNodeRequest is the payload for creating a node via the REST API.
 type SlicerCreateNodeRequest struct {
-	RamGB      int      `json:"ram_gb"`
-	CPUs       int      `json:"cpus"`
+	RamBytes   int64    `json:"ram_bytes,omitempty"`
+	CPUs       int      `json:"cpus,omitempty"`
 	Tags       []string `json:"tags,omitempty"`
-	ImportUser string   `json:"import_user"`
+	ImportUser string   `json:"import_user,omitempty"`
 	Userdata   string   `json:"userdata,omitempty"`
 	SSHKeys    []string `json:"ssh_keys,omitempty"`
 	Secrets    []string `json:"secrets,omitempty"`
+}
+
+// MB converts megabytes to bytes
+func MiB(mb int64) int64 {
+	return mb * 1024 * 1024
+}
+
+// GB converts gigabytes to bytes
+func GiB(gb int64) int64 {
+	return gb * 1024 * 1024 * 1024
 }
 
 // SlicerCreateNodeResponse is the response from the REST API when creating a node.
@@ -46,10 +58,10 @@ func (n *SlicerCreateNodeResponse) IPAddress() net.IP {
 
 // SlicerHostGroup represents a host group from the /hostgroup endpoint.
 type SlicerHostGroup struct {
-	Name     string `json:"name"`
-	Count    int    `json:"count"`
-	RamGB    int    `json:"ram_gb"`
-	CPUs     int    `json:"cpus"`
+	Name     string `json:"name,omitempty"`
+	Count    int    `json:"count,omitempty"`
+	RamBytes int    `json:"ram_bytes,omitempty"`
+	CPUs     int    `json:"cpus,omitempty"`
 	Arch     string `json:"arch,omitempty"`
 	GPUCount int    `json:"gpu_count,omitempty"`
 }
@@ -137,11 +149,13 @@ type SlicerDeleteResponse struct {
 
 // SlicerCreateVMRequest contains parameters for creating a VM
 type SlicerCreateVMRequest struct {
-	GPUCount   int      `json:"gpuCount"`
-	Persistent bool     `json:"persistent"`
-	DiskImage  string   `json:"diskImage,omitempty"`
-	ImportUser string   `json:"importUser,omitempty"`
-	SSHKeys    []string `json:"sshKeys,omitempty"`
+	RamBytes   int      `json:"ram_bytes,omitempty"` // RAM size in bytes (must not exceed host group limit)
+	CPUs       int      `json:"cpus,omitempty"`      // Number of CPUs (must not exceed host group limit)
+	GPUCount   int      `json:"gpu_count,omitempty"`
+	Persistent bool     `json:"persistent,omitempty"`
+	DiskImage  string   `json:"disk_image,omitempty"`
+	ImportUser string   `json:"import_user,omitempty"`
+	SSHKeys    []string `json:"ssh_keys,omitempty"`
 	Userdata   string   `json:"userdata,omitempty"`
 	IP         string   `json:"ip,omitempty"`
 	Tags       []string `json:"tags,omitempty"`
