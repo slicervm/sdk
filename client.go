@@ -662,7 +662,7 @@ func (c *SlicerClient) DeleteVM(ctx context.Context, groupName, hostname string)
 }
 
 // CreateVM creates a new VM in a host group
-func (c *SlicerClient) CreateVM(ctx context.Context, groupName string, request SlicerCreateVMRequest) (*SlicerCreateNodeResponse, error) {
+func (c *SlicerClient) CreateVM(ctx context.Context, groupName string, request SlicerCreateNodeRequest) (*SlicerCreateNodeResponse, error) {
 	u, err := url.Parse(c.baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse API URL: %w", err)

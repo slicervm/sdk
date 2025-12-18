@@ -17,14 +17,18 @@ type SlicerNode struct {
 	Tags      []string  `json:"tags,omitempty"`
 }
 
-// SlicerCreateNodeRequest is the payload for creating a node via the REST API.
+// SlicerCreateNodeRequest contains parameters for creating a node
 type SlicerCreateNodeRequest struct {
-	RamBytes   int64    `json:"ram_bytes,omitempty"`
-	CPUs       int      `json:"cpus,omitempty"`
-	Tags       []string `json:"tags,omitempty"`
+	RamBytes   int64    `json:"ram_bytes,omitempty"` // RAM size in bytes (must not exceed host group limit)
+	CPUs       int      `json:"cpus,omitempty"`      // Number of CPUs (must not exceed host group limit)
+	GPUCount   int      `json:"gpu_count,omitempty"`
+	Persistent bool     `json:"persistent,omitempty"`
+	DiskImage  string   `json:"disk_image,omitempty"`
 	ImportUser string   `json:"import_user,omitempty"`
-	Userdata   string   `json:"userdata,omitempty"`
 	SSHKeys    []string `json:"ssh_keys,omitempty"`
+	Userdata   string   `json:"userdata,omitempty"`
+	IP         string   `json:"ip,omitempty"`
+	Tags       []string `json:"tags,omitempty"`
 	Secrets    []string `json:"secrets,omitempty"`
 }
 
@@ -145,21 +149,6 @@ type SlicerDeleteResponse struct {
 	Message     string `json:"message"`
 	DiskRemoved string `json:"disk_removed"`
 	Error       string `json:"error"`
-}
-
-// SlicerCreateVMRequest contains parameters for creating a VM
-type SlicerCreateVMRequest struct {
-	RamBytes   int      `json:"ram_bytes,omitempty"` // RAM size in bytes (must not exceed host group limit)
-	CPUs       int      `json:"cpus,omitempty"`      // Number of CPUs (must not exceed host group limit)
-	GPUCount   int      `json:"gpu_count,omitempty"`
-	Persistent bool     `json:"persistent,omitempty"`
-	DiskImage  string   `json:"disk_image,omitempty"`
-	ImportUser string   `json:"import_user,omitempty"`
-	SSHKeys    []string `json:"ssh_keys,omitempty"`
-	Userdata   string   `json:"userdata,omitempty"`
-	IP         string   `json:"ip,omitempty"`
-	Tags       []string `json:"tags,omitempty"`
-	Secrets    []string `json:"secrets,omitempty"`
 }
 
 type SlicerAgentHealthResponse struct {
