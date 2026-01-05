@@ -167,3 +167,11 @@ type SlicerAgentHealthResponse struct {
 	// UserdataRan indicates whether the user data script has completed executing
 	UserdataRan bool `json:"userdata_ran,omitempty"`
 }
+
+// SlicerShutdownRequest contains parameters for shutting down or rebooting a VM.
+// Action can be "shutdown" (default) to halt the VM or "reboot" to restart it.
+type SlicerShutdownRequest struct {
+	// Action specifies the shutdown action: "shutdown" (halt) or "reboot" (restart).
+	// If empty, defaults to "shutdown".
+	Action string `json:"action,omitempty"`
+}
