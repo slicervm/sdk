@@ -8,7 +8,19 @@ SDK for [SlicerVM.com](https://slicervm.com)
 go get github.com/slicervm/sdk@latest
 ```
 
-### Example usage
+### Features
+
+- **VM Management**: Create, list, and delete VMs.
+- **Execute Commands in VMs**: Run commands in VMs and stream command output (stdout/stderr).
+- **File Management**: Upload and download files to/from VMs with `CpToVM` and `CpFromVM`.
+- **Secret Management**: Securely manage secrets like API keys or other sensitive information for VMs.
+
+### Documentation
+
+- **Tutorial**: [Execute Commands in VM via SDK](https://docs.slicervm.com/tasks/execute-commands-with-sdk/)
+- **Slicer API Reference**: [API](https://docs.slicervm.com/reference/api/)
+
+### Quick start
 
 Create a new slicer config:
 
@@ -28,6 +40,8 @@ package main
 import (
     "fmt"
     "os"
+    "context"
+    
     sdk "github.com/slicervm/sdk"
 )
 
@@ -41,7 +55,7 @@ func main() {
     client := sdk.NewSlicerClient(baseURL, token, userAgent, nil /* or &http.Client{} */)
 
     createReq := sdk.SlicerCreateNodeRequest{
-        RAMGB:      4,
+        RamBytes:      4 * 1024 * 1024 * 1024, // 4GB RAM 
         CPUs:       2,
         Userdata: `#!/bin/bash
 echo 'Bootstrapping...'
@@ -53,13 +67,14 @@ sudo reboot
         ImportUser: "alexellis", // Optional: Import GitHub keys for a specific user
     }
 
-    res, err := client.CreateNode(hostGroup, createReq)
+    ctx := context.Background()
+    node, err := client.CreateNode(ctx, hostGroup, createReq)
     if err != nil {
         panic(fmt.Errorf("failed to create node: %w", err))
     }
 
-    fmt.Printf("Created VM: hostname=%s ip=%s created_at=%s\n", res.Hostname, res.IP, res.CreatedAt)
-    fmt.Printf("Parsed IP only: %s\n", res.IPAddress())
+    fmt.Printf("Created VM: hostname=%s ip=%s created_at=%s\n", node.Hostname, node.IP, .CreatedAt)
+    fmt.Printf("Parsed IP only: %s\n", node.IPAddress())
 }
 ```
 
@@ -80,6 +95,6 @@ You'll find the logs for the microVM at `/var/log/slicer/HOSTNAME.txt`, showing 
 Notes:
 
 * The argument order for `NewSlicerClient` is `(baseURL, token, userAgent, httpClient)`.
-* `RAMGB`, `CPUs`, and `ImportUser` should be set; `Userdata` and `SSHKeys` are optional.
+* If `RamBytes` or `CPUs` are not the values configured on the host group are used; `Userdata`, `SSHKeys` and `ImportUser` are optional.
 * `Userdata` runs on first boot; keep it idempotent.
 * Use a persistent `http.Client` (e.g. with timeout) in production instead of `nil`.
