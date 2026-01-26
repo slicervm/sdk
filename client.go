@@ -817,3 +817,81 @@ func (c *SlicerClient) Shutdown(ctx context.Context, hostname string, request *S
 
 	return nil
 }
+
+// PauseVM pauses a running VM
+func (c *SlicerClient) PauseVM(ctx context.Context, hostname string) error {
+	u, err := url.Parse(c.baseURL)
+	if err != nil {
+		return fmt.Errorf("failed to parse API URL: %w", err)
+	}
+
+	u.Path = fmt.Sprintf("/vm/%s/pause", hostname)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	if c.userAgent != "" {
+		req.Header.Set("User-Agent", c.userAgent)
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	res, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to pause VM: %w", err)
+	}
+	defer res.Body.Close()
+
+	var body []byte
+	if res.Body != nil {
+		body, _ = io.ReadAll(res.Body)
+	}
+
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("status %s: %s", res.Status, strings.TrimSpace(string(body)))
+	}
+
+	return nil
+}
+
+// ResumeVM resumes a paused VM
+func (c *SlicerClient) ResumeVM(ctx context.Context, hostname string) error {
+	u, err := url.Parse(c.baseURL)
+	if err != nil {
+		return fmt.Errorf("failed to parse API URL: %w", err)
+	}
+
+	u.Path = fmt.Sprintf("/vm/%s/resume", hostname)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	if c.userAgent != "" {
+		req.Header.Set("User-Agent", c.userAgent)
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	res, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to resume VM: %w", err)
+	}
+	defer res.Body.Close()
+
+	var body []byte
+	if res.Body != nil {
+		body, _ = io.ReadAll(res.Body)
+	}
+
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("status %s: %s", res.Status, strings.TrimSpace(string(body)))
+	}
+
+	return nil
+}

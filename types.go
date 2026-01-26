@@ -15,6 +15,7 @@ type SlicerNode struct {
 	CreatedAt time.Time `json:"created_at"`
 	Arch      string    `json:"arch,omitempty"`
 	Tags      []string  `json:"tags,omitempty"`
+	Status    string    `json:"status,omitempty"` // "Running" or "Paused"
 }
 
 // SlicerCreateNodeRequest contains parameters for creating a node
