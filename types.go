@@ -176,3 +176,12 @@ type SlicerShutdownRequest struct {
 	// If empty, defaults to "shutdown".
 	Action string `json:"action,omitempty"`
 }
+
+// SlicerInfo represents version and server information from the /info endpoint
+type SlicerInfo struct {
+	// Version is the version of the slicer server
+	Version string `json:"version,omitempty"`
+
+	// GitCommit is the git commit hash of the slicer server
+	GitCommit string `json:"git_commit,omitempty"`
+}

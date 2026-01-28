@@ -111,6 +111,31 @@ func (c *SlicerClient) GetHostGroups(ctx context.Context) ([]SlicerHostGroup, er
 	return hostGroups, nil
 }
 
+// GetInfo fetches server version information from the /info endpoint
+func (c *SlicerClient) GetInfo(ctx context.Context) (*SlicerInfo, error) {
+	res, err := c.makeJSONRequestWithContext(ctx, http.MethodGet, "/info", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var body []byte
+	if res.Body != nil {
+		defer res.Body.Close()
+		body, _ = io.ReadAll(res.Body)
+	}
+
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API request failed: %s - %s", res.Status, string(body))
+	}
+
+	var info SlicerInfo
+	if err := json.Unmarshal(body, &info); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &info, nil
+}
+
 // GetHostGroupNodes fetches nodes for a specific host group
 func (c *SlicerClient) GetHostGroupNodes(ctx context.Context, groupName string) ([]SlicerNode, error) {
 	endpoint := fmt.Sprintf("hostgroup/%s/nodes", groupName)
