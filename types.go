@@ -85,6 +85,7 @@ type SlicerExecWriteResult struct {
 type SlicerExecRequest struct {
 	Command     string   `json:"command,omitempty"`
 	Args        []string `json:"args,omitempty"`
+	Env         []string `json:"env,omitempty"`
 	UID         uint32   `json:"uid,omitempty"`
 	GID         uint32   `json:"gid,omitempty"`
 	Stdin       bool     `json:"stdin,omitempty"`

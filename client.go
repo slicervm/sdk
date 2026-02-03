@@ -338,6 +338,10 @@ func (c *SlicerClient) Exec(ctx context.Context, nodeName string, execReq Slicer
 		q.Add("args", arg)
 	}
 
+	for _, env := range execReq.Env {
+		q.Add("env", env)
+	}
+
 	q.Set("uid", strconv.FormatUint(uint64(uid), 10))
 	q.Set("gid", strconv.FormatUint(uint64(gid), 10))
 
