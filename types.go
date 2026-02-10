@@ -1,10 +1,13 @@
 package slicer
 
 import (
+	"math"
 	"net"
 	"strings"
 	"time"
 )
+
+const NonRootUser = uint32(math.MaxUint32)
 
 // SlicerNode represents a node managed by the slicer REST API.
 type SlicerNode struct {

@@ -342,8 +342,12 @@ func (c *SlicerClient) Exec(ctx context.Context, nodeName string, execReq Slicer
 		q.Add("env", env)
 	}
 
-	q.Set("uid", strconv.FormatUint(uint64(uid), 10))
-	q.Set("gid", strconv.FormatUint(uint64(gid), 10))
+	if uid != NonRootUser {
+		q.Set("uid", strconv.FormatUint(uint64(uid), 10))
+	}
+	if gid != NonRootUser {
+		q.Set("gid", strconv.FormatUint(uint64(gid), 10))
+	}
 
 	if len(cwd) > 0 {
 		q.Set("cwd", cwd)

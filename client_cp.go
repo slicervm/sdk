@@ -46,12 +46,19 @@ func copyToVMBinary(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath
 	q := url.Values{}
 	q.Set("path", vmPath)
 
+	uidAuto := uid == NonRootUser
+	gidAuto := gid == NonRootUser
+
 	if uid == 0 && gid == 0 {
 		uid, gid = getCurrentUIDGID()
 	}
 
-	q.Set("uid", strconv.FormatUint(uint64(uid), 10))
-	q.Set("gid", strconv.FormatUint(uint64(gid), 10))
+	if !uidAuto {
+		q.Set("uid", strconv.FormatUint(uint64(uid), 10))
+	}
+	if !gidAuto {
+		q.Set("gid", strconv.FormatUint(uint64(gid), 10))
+	}
 
 	if len(permissions) > 0 {
 		q.Set("permissions", permissions)
@@ -106,10 +113,10 @@ func copyToVMTar(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath st
 
 	q := url.Values{}
 	q.Set("path", vmPath)
-	if uid > 0 {
+	if uid > 0 && uid != NonRootUser {
 		q.Set("uid", strconv.FormatUint(uint64(uid), 10))
 	}
-	if gid > 0 {
+	if gid > 0 && gid != NonRootUser {
 		q.Set("gid", strconv.FormatUint(uint64(gid), 10))
 	}
 	if len(permissions) > 0 {
