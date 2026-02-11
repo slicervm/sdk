@@ -963,3 +963,81 @@ func (c *SlicerClient) ResumeVM(ctx context.Context, hostname string) error {
 
 	return nil
 }
+
+// SuspendVM suspends a running VM to disk (Firecracker snapshot)
+func (c *SlicerClient) SuspendVM(ctx context.Context, hostname string) error {
+	u, err := url.Parse(c.baseURL)
+	if err != nil {
+		return fmt.Errorf("failed to parse API URL: %w", err)
+	}
+
+	u.Path = fmt.Sprintf("/vm/%s/suspend", hostname)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	if c.userAgent != "" {
+		req.Header.Set("User-Agent", c.userAgent)
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	res, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to suspend VM: %w", err)
+	}
+	defer res.Body.Close()
+
+	var body []byte
+	if res.Body != nil {
+		body, _ = io.ReadAll(res.Body)
+	}
+
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("status %s: %s", res.Status, strings.TrimSpace(string(body)))
+	}
+
+	return nil
+}
+
+// RestoreVM restores a VM from a Firecracker snapshot
+func (c *SlicerClient) RestoreVM(ctx context.Context, hostname string) error {
+	u, err := url.Parse(c.baseURL)
+	if err != nil {
+		return fmt.Errorf("failed to parse API URL: %w", err)
+	}
+
+	u.Path = fmt.Sprintf("/vm/%s/restore", hostname)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), nil)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	if c.userAgent != "" {
+		req.Header.Set("User-Agent", c.userAgent)
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	res, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to restore VM: %w", err)
+	}
+	defer res.Body.Close()
+
+	var body []byte
+	if res.Body != nil {
+		body, _ = io.ReadAll(res.Body)
+	}
+
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("status %s: %s", res.Status, strings.TrimSpace(string(body)))
+	}
+
+	return nil
+}
