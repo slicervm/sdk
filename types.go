@@ -188,4 +188,10 @@ type SlicerInfo struct {
 
 	// GitCommit is the git commit hash of the slicer server
 	GitCommit string `json:"git_commit,omitempty"`
+
+	// Platform indicates the server operating system (runtime.GOOS).
+	Platform string `json:"platform,omitempty"`
+
+	// Arch is the server architecture (runtime.GOARCH).
+	Arch string `json:"arch,omitempty"`
 }
