@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -13,11 +14,12 @@ import (
 // StreamTarArchive streams a tar archive of regular files and directories to w.
 // Only handles regular files and directories. Preserves mtime and executable bit.
 // Skips symlinks, devices, and other special files.
-func StreamTarArchive(ctx context.Context, w io.Writer, parentDir, baseName string) error {
+func StreamTarArchive(ctx context.Context, w io.Writer, parentDir, baseName string, excludePatterns ...string) error {
 	tw := tar.NewWriter(w)
 	defer tw.Close()
 
 	sourcePath := filepath.Join(parentDir, baseName)
+	excludes := normalizeExcludePatterns(excludePatterns...)
 
 	return filepath.Walk(sourcePath, func(path string, info os.FileInfo, err error) error {
 		select {
@@ -48,6 +50,12 @@ func StreamTarArchive(ctx context.Context, w io.Writer, parentDir, baseName stri
 		}
 
 		relPath = filepath.ToSlash(relPath)
+		if shouldExcludePath(relPath, excludes) {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 
 		// Create header with normalized permissions (strip setuid/setgid/sticky)
 		mode := info.Mode().Perm()
@@ -91,12 +99,123 @@ func StreamTarArchive(ctx context.Context, w io.Writer, parentDir, baseName stri
 	})
 }
 
+func shouldExcludePath(relPath string, excludes []string) bool {
+	if relPath == "" || len(excludes) == 0 {
+		return false
+	}
+
+	normPath := filepath.ToSlash(relPath)
+	baseName := filepath.Base(normPath)
+
+	for _, pattern := range excludes {
+		if pattern == "" {
+			continue
+		}
+
+		if matchPattern(pattern, normPath) {
+			return true
+		}
+
+		if !strings.Contains(pattern, "/") {
+			match, err := path.Match(pattern, baseName)
+			if err != nil {
+				continue
+			}
+			if match {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func normalizeExcludePatterns(patterns ...string) []string {
+	normalized := make([]string, 0, len(patterns))
+	for _, pattern := range patterns {
+		pattern = filepath.ToSlash(strings.TrimSpace(pattern))
+		if pattern == "" {
+			continue
+		}
+		pattern = strings.TrimPrefix(pattern, "./")
+		pattern = strings.TrimPrefix(pattern, "/")
+		pattern = strings.TrimSuffix(pattern, "/")
+
+		if pattern != "" {
+			normalized = append(normalized, pattern)
+		}
+	}
+	return normalized
+}
+
+func matchPattern(pattern string, candidate string) bool {
+	if pattern == "" {
+		return false
+	}
+
+	pattern = strings.Trim(pattern, "/")
+	candidate = strings.Trim(candidate, "/")
+	if pattern == "" {
+		return candidate == ""
+	}
+
+	patternSegments := splitPattern(pattern)
+	candidateSegments := splitPattern(candidate)
+	if len(patternSegments) == 0 || len(candidateSegments) == 0 {
+		return false
+	}
+
+	return matchPatternSegments(patternSegments, candidateSegments, 0, 0)
+}
+
+func matchPatternSegments(patterns, paths []string, patternIdx, pathIdx int) bool {
+	if patternIdx == len(patterns) {
+		return pathIdx == len(paths)
+	}
+
+	pattern := patterns[patternIdx]
+	if pattern == "**" {
+		for i := pathIdx; i <= len(paths); i++ {
+			if matchPatternSegments(patterns, paths, patternIdx+1, i) {
+				return true
+			}
+		}
+		return false
+	}
+
+	if pathIdx >= len(paths) {
+		return false
+	}
+
+	match, err := path.Match(pattern, paths[pathIdx])
+	if err != nil {
+		return false
+	}
+
+	if !match {
+		return false
+	}
+
+	return matchPatternSegments(patterns, paths, patternIdx+1, pathIdx+1)
+}
+
+func splitPattern(input string) []string {
+	input = strings.Trim(input, "/")
+	if input == "" {
+		return nil
+	}
+
+	return strings.Split(filepath.ToSlash(input), "/")
+}
+
 // ExtractTarStream extracts a tar stream from r into extractDir.
 // Only handles regular files and directories. Preserves mtime and executable bit.
 // Normalizes permissions (strips setuid/setgid/sticky bits). Skips all other entry types.
 // If uid or gid are non-zero, files will be chowned to that uid/gid after creation.
 // Note: Permissions are set when opening files (efficient), chown is only applied if uid/gid are non-zero.
-func ExtractTarStream(ctx context.Context, r io.Reader, extractDir string, uid, gid uint32) error {
+func ExtractTarStream(ctx context.Context, r io.Reader, extractDir string, uid, gid uint32, excludePatterns ...string) error {
+	excludes := normalizeExcludePatterns(excludePatterns...)
+
 	absExtractDir, err := filepath.Abs(extractDir)
 	if err != nil {
 		return fmt.Errorf("failed to get absolute path of extract directory: %w", err)
@@ -128,6 +247,10 @@ func ExtractTarStream(ctx context.Context, r io.Reader, extractDir string, uid, 
 		}
 
 		rel := filepath.FromSlash(name)
+		relPattern := filepath.ToSlash(rel)
+		if shouldExcludePath(relPattern, excludes) {
+			continue
+		}
 		target := filepath.Join(extractDir, rel)
 
 		// Security: ensure target is within extractDir
@@ -238,7 +361,7 @@ func ValidRelPath(p string) bool {
 // If dest exists and is a directory, extracts into it. Otherwise extracts and renames.
 // No temporary directories are used - extraction happens directly.
 // If uid or gid are non-zero, files will be chowned to that uid/gid after creation.
-func ExtractTarToPath(ctx context.Context, r io.Reader, dest string, uid, gid uint32) error {
+func ExtractTarToPath(ctx context.Context, r io.Reader, dest string, uid, gid uint32, excludePatterns ...string) error {
 	destInfo, err := os.Stat(dest)
 	destExists := err == nil
 	destIsDir := destExists && destInfo.IsDir()
@@ -260,7 +383,7 @@ func ExtractTarToPath(ctx context.Context, r io.Reader, dest string, uid, gid ui
 	}
 
 	// Extract directly to extractDir
-	if err := ExtractTarStream(ctx, r, extractDir, uid, gid); err != nil {
+	if err := ExtractTarStream(ctx, r, extractDir, uid, gid, excludePatterns...); err != nil {
 		return fmt.Errorf("failed to extract tar: %w", err)
 	}
 

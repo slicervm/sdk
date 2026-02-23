@@ -10,6 +10,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 // getCurrentUIDGID returns the current user's UID and GID.
@@ -97,7 +98,7 @@ func copyToVMBinary(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath
 	return nil
 }
 
-func copyToVMTar(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath string, uid, gid uint32, permissions string) error {
+func copyToVMTar(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath string, uid, gid uint32, permissions string, excludePatterns ...string) error {
 	parentDir := filepath.Dir(absSrc)
 	baseName := filepath.Base(absSrc)
 
@@ -106,7 +107,7 @@ func copyToVMTar(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath st
 
 	go func() {
 		defer pw.Close()
-		if err := StreamTarArchive(ctx, pw, parentDir, baseName); err != nil {
+		if err := StreamTarArchive(ctx, pw, parentDir, baseName, excludePatterns...); err != nil {
 			pw.CloseWithError(fmt.Errorf("failed to stream tar: %w", err))
 		}
 	}()
@@ -121,6 +122,13 @@ func copyToVMTar(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath st
 	}
 	if len(permissions) > 0 {
 		q.Set("permissions", permissions)
+	}
+	for _, pattern := range excludePatterns {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+		q.Add("exclude", pattern)
 	}
 
 	u, err := url.Parse(c.baseURL)
@@ -159,9 +167,16 @@ func copyToVMTar(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath st
 	return nil
 }
 
-func copyFromVMTar(ctx context.Context, c *SlicerClient, vmName, vmPath, localPath string) error {
+func copyFromVMTar(ctx context.Context, c *SlicerClient, vmName, vmPath, localPath string, excludePatterns ...string) error {
 	q := url.Values{}
 	q.Set("path", vmPath)
+	for _, pattern := range excludePatterns {
+		pattern = strings.TrimSpace(pattern)
+		if pattern == "" {
+			continue
+		}
+		q.Add("exclude", pattern)
+	}
 
 	u, err := url.Parse(c.baseURL)
 	if err != nil {
@@ -194,7 +209,7 @@ func copyFromVMTar(ctx context.Context, c *SlicerClient, vmName, vmPath, localPa
 
 	uid, gid := getCurrentUIDGID()
 
-	return ExtractTarToPath(ctx, res.Body, localPath, uid, gid)
+	return ExtractTarToPath(ctx, res.Body, localPath, uid, gid, excludePatterns...)
 }
 
 func copyFromVMBinary(ctx context.Context, c *SlicerClient, vmName, vmPath, localPath string, permissions string) error {

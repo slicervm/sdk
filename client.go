@@ -468,7 +468,7 @@ func (c *SlicerClient) Exec(ctx context.Context, nodeName string, execReq Slicer
 // The localPath can be a file or directory. The tar stream is created
 // internally and sent to the VM.
 // uid and gid specify the ownership for extracted files (0 means use default).
-func (c *SlicerClient) CpToVM(ctx context.Context, vmName, localPath, vmPath string, uid, gid uint32, permissions, mode string) error {
+func (c *SlicerClient) CpToVM(ctx context.Context, vmName, localPath, vmPath string, uid, gid uint32, permissions, mode string, excludePatterns ...string) error {
 	// Get absolute path to handle symlinks correctly
 	absSrc, err := filepath.Abs(localPath)
 	if err != nil {
@@ -484,7 +484,7 @@ func (c *SlicerClient) CpToVM(ctx context.Context, vmName, localPath, vmPath str
 	default:
 		return fmt.Errorf("invalid mode: %s", mode)
 	case "tar":
-		if err := copyToVMTar(ctx, c, absSrc, vmName, vmPath, uid, gid, permissions); err != nil {
+		if err := copyToVMTar(ctx, c, absSrc, vmName, vmPath, uid, gid, permissions, excludePatterns...); err != nil {
 			return err
 		}
 	case "binary":
@@ -501,13 +501,13 @@ func (c *SlicerClient) CpToVM(ctx context.Context, vmName, localPath, vmPath str
 // with proper renaming logic (supports renaming files/directories).
 // If uid or gid are 0, the current user's UID/GID will be used.
 // On Windows, chown operations are skipped (uid/gid are ignored).
-func (c *SlicerClient) CpFromVM(ctx context.Context, vmName, vmPath, localPath string, permissions, mode string) error {
+func (c *SlicerClient) CpFromVM(ctx context.Context, vmName, vmPath, localPath string, permissions, mode string, excludePatterns ...string) error {
 
 	switch mode {
 	default:
 		return fmt.Errorf("invalid mode: %s", mode)
 	case "tar":
-		return copyFromVMTar(ctx, c, vmName, vmPath, localPath)
+		return copyFromVMTar(ctx, c, vmName, vmPath, localPath, excludePatterns...)
 	case "binary":
 		return copyFromVMBinary(ctx, c, vmName, vmPath, localPath, permissions)
 	}
