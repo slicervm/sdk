@@ -172,8 +172,8 @@ func (c *SlicerClient) GetHostGroupNodes(ctx context.Context, groupName string) 
 	return nodes, nil
 }
 
-// CreateNode creates a new node in the specified host group
-func (c *SlicerClient) CreateNode(ctx context.Context, groupName string, request SlicerCreateNodeRequest) (*SlicerCreateNodeResponse, error) {
+// CreateVM creates a new VM in the specified host group
+func (c *SlicerClient) CreateVM(ctx context.Context, groupName string, request SlicerCreateNodeRequest) (*SlicerCreateNodeResponse, error) {
 	endpoint := fmt.Sprintf("hostgroup/%s/nodes", groupName)
 	res, err := c.makeJSONRequestWithContext(ctx, http.MethodPost, endpoint, request)
 	if err != nil {
@@ -702,56 +702,6 @@ func (c *SlicerClient) DeleteVM(ctx context.Context, groupName, hostname string)
 	}
 
 	return &delResp, nil
-}
-
-// CreateVM creates a new VM in a host group
-func (c *SlicerClient) CreateVM(ctx context.Context, groupName string, request SlicerCreateNodeRequest) (*SlicerCreateNodeResponse, error) {
-	u, err := url.Parse(c.baseURL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse API URL: %w", err)
-	}
-
-	u.Path = fmt.Sprintf("/hostgroup/%s/nodes", groupName)
-
-	jsonBody, err := json.Marshal(request)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), bytes.NewReader(jsonBody))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	if c.userAgent != "" {
-		req.Header.Set("User-Agent", c.userAgent)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
-
-	res, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create VM: %w", err)
-	}
-	defer res.Body.Close()
-
-	var body []byte
-	if res.Body != nil {
-		body, _ = io.ReadAll(res.Body)
-	}
-
-	if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusCreated {
-		return nil, fmt.Errorf("status %s: %s", res.Status, strings.TrimSpace(string(body)))
-	}
-
-	var created SlicerCreateNodeResponse
-	if err := json.NewDecoder(bytes.NewBuffer(body)).Decode(&created); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	return &created, nil
 }
 
 // GetInfo fetches server version information from the /info endpoint

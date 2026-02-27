@@ -79,7 +79,6 @@ err := client.ResumeVM(ctx, "vm-1")
 | `ListVMs(ctx)` | List all VMs across all host groups | `ctx` (context.Context) | ([]SlicerNode, error) |
 | `GetHostGroups(ctx)` | Fetch all host groups | `ctx` (context.Context) | ([]SlicerHostGroup, error) |
 | `GetHostGroupNodes(ctx, groupName)` | Fetch nodes for a specific host group | `ctx` (context.Context), `groupName` (string) | ([]SlicerNode, error) |
-| `CreateNode(ctx, groupName, request)` | Create a new node in a host group | `ctx` (context.Context), `groupName` (string), `request` (SlicerCreateNodeRequest) | (*SlicerCreateNodeResponse, error) |
 | `DeleteNode(groupName, nodeName)` | Delete a node from a host group | `groupName` (string), `nodeName` (string) | error |
 | `PauseVM(ctx, hostname)` | Pause a running VM to save CPU cost | `ctx` (context.Context), `hostname` (string) | error |
 | `ResumeVM(ctx, hostname)` | Resume a paused VM | `ctx` (context.Context), `hostname` (string) | error |
@@ -106,8 +105,6 @@ err := client.ResumeVM(ctx, "vm-1")
 | `PatchSecret(ctx, secretName, request)` | Update an existing secret with new data and/or metadata. Only provided fields are modified. | `ctx` (context.Context), `secretName` (string), `request` (UpdateSecretRequest) | error |
 | `DeleteSecret(ctx, secretName)` | Delete a secret | `ctx` (context.Context), `secretName` (string) | error |
 
-
-
 ### Documentation
 
 - **Tutorial**: [Execute Commands in VM via SDK](https://docs.slicervm.com/tasks/execute-commands-with-sdk/)
@@ -115,7 +112,11 @@ err := client.ResumeVM(ctx, "vm-1")
 
 ### Quick start
 
-Create a new slicer config:
+Create a new slicer config with a `count` of `0`.
+
+Every VM launched by API will be ephemeral, so it'll be deleted after running `sudo -E slicer vm shutdown NAME`, or when it's deleted either by an API call, this slicer daemon shutting down, or when you delete the VM via REST API.
+
+The first launch will take the name `api-1`, then `api-2` and so forth. You can attach tags when you create the VM, if you want a stable name that can be looked up via the list endpoint.
 
 ```bash
 slicer new api \
@@ -123,6 +124,12 @@ slicer new api \
     --graceful-shutdown=false \
     --ram 4 \
     --cpu 2 > api.yaml
+```
+
+Start Slicer:
+
+```bash
+sudo -E slicer up ./api.yaml
 ```
 
 Create a VM (node) in a host group with the default RAM/CPU settings as defined in the host group.
@@ -161,7 +168,7 @@ sudo reboot
     }
 
     ctx := context.Background()
-    node, err := client.CreateNode(ctx, hostGroup, createReq)
+    node, err := client.CreateVM(ctx, hostGroup, createReq)
     if err != nil {
         panic(fmt.Errorf("failed to create node: %w", err))
     }
@@ -169,12 +176,6 @@ sudo reboot
     fmt.Printf("Created VM: hostname=%s ip=%s created_at=%s\n", node.Hostname, node.IP, .CreatedAt)
     fmt.Printf("Parsed IP only: %s\n", node.IPAddress())
 }
-```
-
-Start Slicer:
-
-```bash
-sudo -E slicer up ./api.yaml
 ```
 
 Run the program i.e. after running `go build -o client main.go`:
