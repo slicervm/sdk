@@ -70,6 +70,19 @@ err := client.ResumeVM(ctx, "vm-1")
 
 ### SDK Methods Reference
 
+#### Key concepts
+
+User-facing documentation may refer to Sandboxes and Services. These are logical concepts, not API primitives.
+
+Primitives:
+
+* `Host Group` - Host Groups define the template or specification for a Virtual Machine. A slicer daemon can have multiple host groups, but most use-cases should use only one.
+* `VM` - A virtual machine - (sometimes called Node)
+
+When you want a "Sandbox" (read: disposable VM launched via API), it's recommended that you have `count: 0` in your host group. VMs launched via API are backed by a persistent disk or snapshot whilst running, which is removed when they terminate.
+
+When you want to host a "Service" or run a server, such as a Kubernetes cluster, or a version of your application, it's best to write a succinct name for the host group such as "k3s" or "app" and then define how many VMs you'll need via `count: 1`, or `count: 3`, etc.
+
 #### VM Operations
 
 | Method | Description | Parameters | Returns |
