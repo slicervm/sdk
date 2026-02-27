@@ -76,8 +76,8 @@ User-facing documentation may refer to Sandboxes and Services. These are logical
 
 Primitives:
 
-* `Host Group` - Host Groups define the template or specification for a Virtual Machine. A slicer daemon can have multiple host groups, but most use-cases should use only one.
-* `VM` - A virtual machine - (sometimes called Node)
+* `Host Group` - Host Groups define the template or specification for a Virtual Machine. A slicer daemon can have multiple host groups, but most use-cases should use only one. Host Groups are defined in YAML, and not via API at this time.
+* `VM` - A virtual machine - (sometimes called Node). Theses are either launched via an initial `count` value per Host Group, or on demand via API.
 
 When you want a "Sandbox" (read: disposable VM launched via API), it's recommended that you have `count: 0` in your host group. VMs launched via API are backed by a persistent disk or snapshot whilst running, which is removed when they terminate.
 
