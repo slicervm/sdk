@@ -123,6 +123,12 @@ When you want to host a "Service" or run a server, such as a Kubernetes cluster,
 - **Tutorial**: [Execute Commands in VM via SDK](https://docs.slicervm.com/tasks/execute-commands-with-sdk/)
 - **Slicer API Reference**: [API](https://docs.slicervm.com/reference/api/)
 
+### Samples/Examples
+
+* [Create a VM with Userdata](examples/create/main.go)
+* [Create a VM with k3s installed via Userdata](examples/k3s-userdata/main.go)s
+* [Create a VM with claude code and run a headless inference](examples/claude/main.go)
+
 ### Quick start
 
 Create a new slicer config with a `count` of `0`.
@@ -186,7 +192,7 @@ sudo reboot
         panic(fmt.Errorf("failed to create node: %w", err))
     }
 
-    fmt.Printf("Created VM: hostname=%s ip=%s created_at=%s\n", node.Hostname, node.IP, .CreatedAt)
+    fmt.Printf("Created VM: hostname=%s ip=%s created_at=%s\n", node.Hostname, node.IP, node.CreatedAt)
     fmt.Printf("Parsed IP only: %s\n", node.IPAddress())
 }
 ```
@@ -205,3 +211,5 @@ Notes:
 * If `RamBytes` or `CPUs` are not the values configured on the host group are used; `Userdata`, `SSHKeys` and `ImportUser` are optional.
 * `Userdata` runs on first boot; keep it idempotent.
 * Use a persistent `http.Client` (e.g. with timeout) in production instead of `nil`.
+
+See a more minimal example at: [examples/create/main.go](examples/create/main.go)
