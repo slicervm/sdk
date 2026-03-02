@@ -1,4 +1,4 @@
-# file-transfer example
+# transform example
 
 This example demonstrates copy-in, process-on-VM, copy-out.
 

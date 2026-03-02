@@ -128,6 +128,7 @@ When you want to host a "Service" or run a server, such as a Kubernetes cluster,
 * [Create a VM with Userdata](examples/create/main.go)
 * [Create a VM with k3s installed via Userdata](examples/k3s-userdata/main.go)s
 * [Create a VM with claude code and run a headless inference](examples/claude/main.go)
+* [Upload a file to process in VM, download the results](examples/transform/main.go)
 
 ### Quick start
 
