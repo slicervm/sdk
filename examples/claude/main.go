@@ -163,7 +163,7 @@ func waitForClaudeBinary(ctx context.Context, client *slicer.SlicerClient, nodeN
 }
 
 func waitForUserdataDone(ctx context.Context, client *slicer.SlicerClient, nodeName string) error {
-	retryDelay := 500 * time.Millisecond
+	retryDelay := 10 * time.Millisecond
 	for attempt := 1; ; attempt++ {
 		if ctx.Err() != nil {
 			return ctx.Err()

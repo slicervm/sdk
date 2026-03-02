@@ -135,7 +135,7 @@ func waitForKubectlNodes(ctx context.Context, client *slicer.SlicerClient, nodeN
 }
 
 func waitForVMReady(ctx context.Context, client *slicer.SlicerClient, nodeName string) error {
-	retryDelay := 100 * time.Millisecond
+	retryDelay := 10 * time.Millisecond
 	for attempt := 1; ; attempt++ {
 		if ctx.Err() != nil {
 			return ctx.Err()
