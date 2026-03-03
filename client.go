@@ -79,6 +79,66 @@ func NewSlicerClient(baseURL, token string, userAgent string, httpClient *http.C
 	}
 }
 
+// NewClientFromEnv creates a client using environment credentials.
+//
+// The token is loaded from env as:
+// - SLICER_TOKEN (preferred), or
+// - SLICER_TOKEN_FILE.
+//
+// Parameters:
+// - baseURL: if empty, loaded from SLICER_URL
+// - userAgent: if empty, loaded from SLICER_USER_AGENT or "slicer-sdk-go/1.0"
+// - httpClient: optional custom HTTP client passed to NewSlicerClient
+func NewClientFromEnv(baseURL, userAgent string, httpClient *http.Client) (*SlicerClient, error) {
+	if baseURL == "" {
+		baseURL = strings.TrimSpace(os.Getenv("SLICER_URL"))
+	}
+	if baseURL == "" {
+		return nil, fmt.Errorf("SLICER_URL is required")
+	}
+
+	if userAgent == "" {
+		userAgent = strings.TrimSpace(os.Getenv("SLICER_USER_AGENT"))
+	}
+	if userAgent == "" {
+		userAgent = "slicer-sdk-go/1.0"
+	}
+
+	token := strings.TrimSpace(os.Getenv("SLICER_TOKEN"))
+	if token == "" {
+		tokenFile := strings.TrimSpace(os.Getenv("SLICER_TOKEN_FILE"))
+		if tokenFile == "" {
+			return nil, fmt.Errorf("SLICER_TOKEN or SLICER_TOKEN_FILE is required")
+		}
+
+		if strings.HasPrefix(tokenFile, "~/") {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return nil, fmt.Errorf("resolve home dir for SLICER_TOKEN_FILE: %w", err)
+			}
+			tokenFile = filepath.Join(home, tokenFile[2:])
+		}
+
+		rawToken, err := os.ReadFile(tokenFile)
+		if err != nil {
+			return nil, fmt.Errorf("read SLICER_TOKEN_FILE %q: %w", tokenFile, err)
+		}
+
+		token = strings.TrimSpace(string(rawToken))
+		if token == "" {
+			return nil, fmt.Errorf("SLICER_TOKEN_FILE %q is empty", tokenFile)
+		}
+	}
+
+	return NewSlicerClient(baseURL, token, userAgent, httpClient), nil
+}
+
+// NewSlicerClientFromEnv creates a client from env using default userAgent and default http client.
+// This keeps compatibility with the earlier env-only constructor shape.
+func NewSlicerClientFromEnv() (*SlicerClient, error) {
+	return NewClientFromEnv("", "", nil)
+}
+
 // makeJSONRequest creates and executes an HTTP request with proper authentication
 func (c *SlicerClient) makeJSONRequest(method, endpoint string, body interface{}) (*http.Response, error) {
 	ctx := context.Background()
