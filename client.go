@@ -190,7 +190,10 @@ func (c *SlicerClient) GetHostGroups(ctx context.Context) ([]SlicerHostGroup, er
 
 	var body []byte
 	if res.Body != nil {
-		defer res.Body.Close()
+		defer func() {
+			_, _ = io.Copy(io.Discard, res.Body)
+			_ = res.Body.Close()
+		}()
 		body, _ = io.ReadAll(res.Body)
 	}
 
@@ -216,7 +219,10 @@ func (c *SlicerClient) GetHostGroupNodes(ctx context.Context, groupName string) 
 
 	var body []byte
 	if res.Body != nil {
-		defer res.Body.Close()
+		defer func() {
+			_, _ = io.Copy(io.Discard, res.Body)
+			_ = res.Body.Close()
+		}()
 		body, _ = io.ReadAll(res.Body)
 	}
 
@@ -242,7 +248,10 @@ func (c *SlicerClient) CreateVM(ctx context.Context, groupName string, request S
 
 	var body []byte
 	if res.Body != nil {
-		defer res.Body.Close()
+		defer func() {
+			_, _ = io.Copy(io.Discard, res.Body)
+			_ = res.Body.Close()
+		}()
 		body, _ = io.ReadAll(res.Body)
 	}
 
@@ -268,7 +277,10 @@ func (c *SlicerClient) DeleteNode(groupName, nodeName string) error {
 
 	var body []byte
 	if res.Body != nil {
-		defer res.Body.Close()
+		defer func() {
+			_, _ = io.Copy(io.Discard, res.Body)
+			_ = res.Body.Close()
+		}()
 		body, _ = io.ReadAll(res.Body)
 	}
 
@@ -289,7 +301,10 @@ func (c *SlicerClient) ListSecrets(ctx context.Context) ([]Secret, error) {
 
 	var body []byte
 	if res.Body != nil {
-		defer res.Body.Close()
+		defer func() {
+			_, _ = io.Copy(io.Discard, res.Body)
+			_ = res.Body.Close()
+		}()
 		body, _ = io.ReadAll(res.Body)
 	}
 
@@ -316,7 +331,10 @@ func (c *SlicerClient) CreateSecret(ctx context.Context, request CreateSecretReq
 
 	var body []byte
 	if res.Body != nil {
-		defer res.Body.Close()
+		defer func() {
+			_, _ = io.Copy(io.Discard, res.Body)
+			_ = res.Body.Close()
+		}()
 		body, _ = io.ReadAll(res.Body)
 	}
 
@@ -343,7 +361,10 @@ func (c *SlicerClient) PatchSecret(ctx context.Context, secretName string, reque
 
 	var body []byte
 	if res.Body != nil {
-		defer res.Body.Close()
+		defer func() {
+			_, _ = io.Copy(io.Discard, res.Body)
+			_ = res.Body.Close()
+		}()
 		body, _ = io.ReadAll(res.Body)
 	}
 
@@ -365,7 +386,10 @@ func (c *SlicerClient) DeleteSecret(ctx context.Context, secretName string) erro
 
 	var body []byte
 	if res.Body != nil {
-		defer res.Body.Close()
+		defer func() {
+			_, _ = io.Copy(io.Discard, res.Body)
+			_ = res.Body.Close()
+		}()
 		body, _ = io.ReadAll(res.Body)
 	}
 
@@ -450,7 +474,10 @@ func (c *SlicerClient) Exec(ctx context.Context, nodeName string, execReq Slicer
 	if res.StatusCode != http.StatusOK {
 		var body []byte
 		if res.Body != nil {
-			defer res.Body.Close()
+			defer func() {
+				_, _ = io.Copy(io.Discard, res.Body)
+				_ = res.Body.Close()
+			}()
 			body, _ = io.ReadAll(res.Body)
 		}
 		return resChan, fmt.Errorf("failed to execute command: %s %s", res.Status, string(body))
@@ -604,10 +631,12 @@ func (c *SlicerClient) GetVMStats(ctx context.Context, hostname string) ([]Slice
 	if err != nil {
 		return nil, fmt.Errorf("failed to perform GET request: %w", err)
 	}
-	defer res.Body.Close()
-
 	var body []byte
 	if res.Body != nil {
+		defer func() {
+			_, _ = io.Copy(io.Discard, res.Body)
+			_ = res.Body.Close()
+		}()
 		body, _ = io.ReadAll(res.Body)
 	}
 
@@ -653,10 +682,12 @@ func (c *SlicerClient) GetVMLogs(ctx context.Context, hostname string, lines int
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch logs: %w", err)
 	}
-	defer res.Body.Close()
-
 	var body []byte
 	if res.Body != nil {
+		defer func() {
+			_, _ = io.Copy(io.Discard, res.Body)
+			_ = res.Body.Close()
+		}()
 		body, _ = io.ReadAll(res.Body)
 	}
 
@@ -697,10 +728,12 @@ func (c *SlicerClient) ListVMs(ctx context.Context) ([]SlicerNode, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch VMs: %w", err)
 	}
-	defer res.Body.Close()
-
 	var body []byte
 	if res.Body != nil {
+		defer func() {
+			_, _ = io.Copy(io.Discard, res.Body)
+			_ = res.Body.Close()
+		}()
 		body, _ = io.ReadAll(res.Body)
 	}
 
@@ -741,10 +774,12 @@ func (c *SlicerClient) DeleteVM(ctx context.Context, groupName, hostname string)
 	if err != nil {
 		return nil, fmt.Errorf("failed to delete VM: %w", err)
 	}
-	defer res.Body.Close()
-
 	var body []byte
 	if res.Body != nil {
+		defer func() {
+			_, _ = io.Copy(io.Discard, res.Body)
+			_ = res.Body.Close()
+		}()
 		body, _ = io.ReadAll(res.Body)
 	}
 
@@ -773,7 +808,10 @@ func (c *SlicerClient) GetInfo(ctx context.Context) (*SlicerInfo, error) {
 
 	var body []byte
 	if res.Body != nil {
-		defer res.Body.Close()
+		defer func() {
+			_, _ = io.Copy(io.Discard, res.Body)
+			_ = res.Body.Close()
+		}()
 		body, _ = io.ReadAll(res.Body)
 	}
 
@@ -820,10 +858,12 @@ func (c *SlicerClient) GetAgentHealth(ctx context.Context, hostname string, incl
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch agent health: %w", err)
 	}
-	defer res.Body.Close()
-
 	var body []byte
 	if res.Body != nil {
+		defer func() {
+			_, _ = io.Copy(io.Discard, res.Body)
+			_ = res.Body.Close()
+		}()
 		body, _ = io.ReadAll(res.Body)
 	}
 
@@ -882,10 +922,12 @@ func (c *SlicerClient) Shutdown(ctx context.Context, hostname string, request *S
 	if err != nil {
 		return fmt.Errorf("failed to shutdown VM: %w", err)
 	}
-	defer res.Body.Close()
-
 	var body []byte
 	if res.Body != nil {
+		defer func() {
+			_, _ = io.Copy(io.Discard, res.Body)
+			_ = res.Body.Close()
+		}()
 		body, _ = io.ReadAll(res.Body)
 	}
 
@@ -921,10 +963,12 @@ func (c *SlicerClient) PauseVM(ctx context.Context, hostname string) error {
 	if err != nil {
 		return fmt.Errorf("failed to pause VM: %w", err)
 	}
-	defer res.Body.Close()
-
 	var body []byte
 	if res.Body != nil {
+		defer func() {
+			_, _ = io.Copy(io.Discard, res.Body)
+			_ = res.Body.Close()
+		}()
 		body, _ = io.ReadAll(res.Body)
 	}
 
@@ -960,10 +1004,12 @@ func (c *SlicerClient) ResumeVM(ctx context.Context, hostname string) error {
 	if err != nil {
 		return fmt.Errorf("failed to resume VM: %w", err)
 	}
-	defer res.Body.Close()
-
 	var body []byte
 	if res.Body != nil {
+		defer func() {
+			_, _ = io.Copy(io.Discard, res.Body)
+			_ = res.Body.Close()
+		}()
 		body, _ = io.ReadAll(res.Body)
 	}
 
@@ -999,10 +1045,12 @@ func (c *SlicerClient) SuspendVM(ctx context.Context, hostname string) error {
 	if err != nil {
 		return fmt.Errorf("failed to suspend VM: %w", err)
 	}
-	defer res.Body.Close()
-
 	var body []byte
 	if res.Body != nil {
+		defer func() {
+			_, _ = io.Copy(io.Discard, res.Body)
+			_ = res.Body.Close()
+		}()
 		body, _ = io.ReadAll(res.Body)
 	}
 
@@ -1038,10 +1086,12 @@ func (c *SlicerClient) RestoreVM(ctx context.Context, hostname string) error {
 	if err != nil {
 		return fmt.Errorf("failed to restore VM: %w", err)
 	}
-	defer res.Body.Close()
-
 	var body []byte
 	if res.Body != nil {
+		defer func() {
+			_, _ = io.Copy(io.Discard, res.Body)
+			_ = res.Body.Close()
+		}()
 		body, _ = io.ReadAll(res.Body)
 	}
 

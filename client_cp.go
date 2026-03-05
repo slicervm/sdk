@@ -85,7 +85,12 @@ func copyToVMBinary(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath
 	if err != nil {
 		return fmt.Errorf("failed to perform POST request: %w", err)
 	}
-	defer res.Body.Close()
+	if res.Body != nil {
+		defer func() {
+			_, _ = io.Copy(io.Discard, res.Body)
+			_ = res.Body.Close()
+		}()
+	}
 
 	if res.StatusCode != http.StatusOK {
 		var body []byte
@@ -153,7 +158,10 @@ func copyToVMTar(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath st
 	}
 
 	if res.Body != nil {
-		defer res.Body.Close()
+		defer func() {
+			_, _ = io.Copy(io.Discard, res.Body)
+			_ = res.Body.Close()
+		}()
 	}
 
 	if res.StatusCode != http.StatusOK {
@@ -197,7 +205,12 @@ func copyFromVMTar(ctx context.Context, c *SlicerClient, vmName, vmPath, localPa
 	if err != nil {
 		return fmt.Errorf("failed to perform GET request: %w", err)
 	}
-	defer res.Body.Close()
+	if res.Body != nil {
+		defer func() {
+			_, _ = io.Copy(io.Discard, res.Body)
+			_ = res.Body.Close()
+		}()
+	}
 
 	if res.StatusCode != http.StatusOK {
 		var body []byte
@@ -253,7 +266,10 @@ func copyFromVMBinary(ctx context.Context, c *SlicerClient, vmName, vmPath, loca
 	}
 
 	if res.Body != nil {
-		defer res.Body.Close()
+		defer func() {
+			_, _ = io.Copy(io.Discard, res.Body)
+			_ = res.Body.Close()
+		}()
 	}
 
 	if res.StatusCode != http.StatusOK {

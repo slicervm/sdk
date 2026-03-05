@@ -577,7 +577,10 @@ func (c *SlicerClient) ExecWithReader(ctx context.Context, nodeName string, exec
 	if res.StatusCode != http.StatusOK {
 		var body []byte
 		if res.Body != nil {
-			defer res.Body.Close()
+			defer func() {
+				_, _ = io.Copy(io.Discard, res.Body)
+				_ = res.Body.Close()
+			}()
 			body, _ = io.ReadAll(res.Body)
 		}
 		return resChan, fmt.Errorf("failed to execute command: %s %s", res.Status, string(body))
