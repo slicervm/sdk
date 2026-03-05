@@ -13,13 +13,15 @@ What it does:
 Run:
 
 ```bash
-SLICER_URL=http://192.168.1.34:8080 \
-SLICER_TOKEN=$(cat ~/s9-token) \
+SLICER_URL=~/slicer-mac/slicer.sock \
 go run ./examples/k3s-userdata
 ```
 
+The example probes `slicer` via the SDK `/info` endpoint. If the daemon reports `platform=darwin`, it always uses the `sbox` hostgroup.
+
 Optional overrides:
 
+- For remote authenticated slicer instances, add `SLICER_TOKEN`.
 - `SLICER_HOST_GROUP` (default: `vm`)
 - `K3S_TAG` (default: `k3s-<unix timestamp>`)
 - `SLICER_NODE_IP` (optional override if API-provided IP parsing fails)
@@ -32,4 +34,3 @@ Output includes:
 ```bash
 KUBECONFIG=./kubeconfig-vm-1.yaml kubectl get nodes
 ```
-

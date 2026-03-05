@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -32,17 +33,26 @@ k3sup ready --kubeconfig ./kubeconfig
 
 func main() {
 	totalStart := time.Now()
-	baseURL := envOrDefault("SLICER_URL", "http://192.168.1.34:8080")
+	baseURL := resolveBaseURL() // Override via SLICER_URL if needed.
 	token := os.Getenv("SLICER_TOKEN")
 	hostGroup := envOrDefault("SLICER_HOST_GROUP", "vm")
 	tag := envOrDefault("K3S_TAG", fmt.Sprintf("k3s-%d", time.Now().Unix()))
 
-	if token == "" {
+	if token == "" && !isUnixSocket(baseURL) {
 		fmt.Println("SLICER_TOKEN is required")
 		os.Exit(1)
 	}
 
 	client := slicer.NewSlicerClient(baseURL, token, "slicer-k3s-userdata/1.0", nil)
+
+	infoCtx, infoCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer infoCancel()
+
+	hostGroup, err := resolveHostGroup(infoCtx, client, hostGroup)
+	if err != nil {
+		fmt.Printf("failed to resolve hostgroup from /info: %v\n", err)
+		fmt.Printf("using configured host group: %s\n", hostGroup)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -171,7 +181,7 @@ func runKubectlNodes(ctx context.Context, client *slicer.SlicerClient, nodeName 
 
 	text := string(stdout)
 	if strings.TrimSpace(text) == "" {
-		return "", fmt.Errorf("no output from kubectl get nodes")
+		return "", fmt.Errorf("no output from kubectl command")
 	}
 
 	return text, nil
@@ -226,6 +236,36 @@ func parseNodeIP(raw string) (string, error) {
 	}
 
 	return ip.String(), nil
+}
+
+func isUnixSocket(baseURL string) bool {
+	return strings.HasPrefix(baseURL, "/") || strings.HasPrefix(baseURL, "./")
+}
+
+func resolveBaseURL() string {
+	baseURL := envOrDefault("SLICER_URL", "~/slicer-mac/slicer.sock")
+	if strings.HasPrefix(baseURL, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			fmt.Printf("resolve SLICER_URL home directory: %v\n", err)
+			os.Exit(1)
+		}
+		baseURL = filepath.Join(home, baseURL[2:])
+	}
+	return baseURL
+}
+
+func resolveHostGroup(ctx context.Context, client *slicer.SlicerClient, configured string) (string, error) {
+	info, err := client.GetInfo(ctx)
+	if err != nil {
+		return configured, err
+	}
+
+	if strings.EqualFold(info.Platform, "darwin") {
+		return "sbox", nil
+	}
+
+	return configured, nil
 }
 
 func envOrDefault(key, def string) string {

@@ -12,7 +12,6 @@ Run:
 
 ```bash
 SLICER_URL=http://192.168.1.34:8080 \
-SLICER_TOKEN=$(cat ~/s9-token) \
+SLICER_TOKEN=$(cat ~/slicer-token.txt) \
 go run ./examples/create
 ```
-
