@@ -28,7 +28,7 @@ mkdir -p /home/ubuntu/.kube
 cp kubeconfig /home/ubuntu/.kube/config
 chown -R ubuntu:ubuntu /home/ubuntu/
 
-k3sup ready --kubeconfig ./kubeconfig
+k3sup ready --kubeconfig ./kubeconfig --pause 500ms --attempts 120
 `
 
 func main() {
@@ -119,7 +119,7 @@ func main() {
 }
 
 func waitForKubectlNodes(ctx context.Context, client *slicer.SlicerClient, nodeName string, uid uint32) (string, error) {
-	retryDelay := 15 * time.Second
+	retryDelay := 1 * time.Second
 	for attempt := 1; ; attempt++ {
 		if ctx.Err() != nil {
 			return "", ctx.Err()
