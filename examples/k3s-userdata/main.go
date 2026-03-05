@@ -79,7 +79,7 @@ func main() {
 	defer execCancel()
 
 	readyStart := time.Now()
-	err = waitForVMReady(execCtx, client, node.Hostname)
+	err = waitForVMUserdataReady(execCtx, client, node.Hostname)
 	if err != nil {
 		fmt.Printf("VM not ready yet: %v\n", err)
 		os.Exit(1)
@@ -144,19 +144,25 @@ func waitForKubectlNodes(ctx context.Context, client *slicer.SlicerClient, nodeN
 	}
 }
 
-func waitForVMReady(ctx context.Context, client *slicer.SlicerClient, nodeName string) error {
-	retryDelay := 10 * time.Millisecond
+func waitForVMUserdataReady(ctx context.Context, client *slicer.SlicerClient, nodeName string) error {
+	retryDelay := 250 * time.Millisecond
 	for attempt := 1; ; attempt++ {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 
-		_, err := client.GetAgentHealth(ctx, nodeName, false)
-		if err == nil {
+		health, err := client.GetAgentHealth(ctx, nodeName, true)
+		if err != nil {
+			if attempt == 1 || attempt%20 == 0 {
+				fmt.Printf("attempt %d: VM not ready yet (%v)\n", attempt, err)
+			}
+		} else if !health.UserdataRan {
+			if attempt == 1 || attempt%20 == 0 {
+				fmt.Printf("attempt %d: user-data not complete yet for %s\n", attempt, nodeName)
+			}
+		} else {
 			return nil
 		}
-
-		fmt.Printf("attempt %d: VM not ready yet (%v)\n", attempt, err)
 
 		select {
 		case <-time.After(retryDelay):
