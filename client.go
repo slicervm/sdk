@@ -35,7 +35,36 @@ type SlicerClient struct {
 
 // isUnixSocketPath checks if the given path is a Unix socket path
 func isUnixSocketPath(path string) bool {
-	return strings.HasPrefix(path, "/") || strings.HasPrefix(path, "./")
+	_, ok := normalizeUnixSocketPath(path)
+	return ok
+}
+
+func normalizeUnixSocketPath(path string) (string, bool) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", false
+	}
+
+	if strings.HasPrefix(path, "unix://") {
+		path = strings.TrimPrefix(path, "unix://")
+	}
+
+	switch {
+	case strings.HasPrefix(path, "/"),
+		strings.HasPrefix(path, "./"),
+		strings.HasPrefix(path, "../"),
+		strings.HasPrefix(path, "~/"),
+		strings.HasSuffix(path, ".sock"):
+		if strings.HasPrefix(path, "~/") {
+			home, err := os.UserHomeDir()
+			if err == nil {
+				path = filepath.Join(home, path[2:])
+			}
+		}
+		return path, true
+	default:
+		return "", false
+	}
 }
 
 // NewSlicerClient creates a new Slicer API client
@@ -45,9 +74,9 @@ func NewSlicerClient(baseURL, token string, userAgent string, httpClient *http.C
 	var unixSocket string
 	var client *http.Client
 
-	if isUnixSocketPath(baseURL) {
+	if socketPath, ok := normalizeUnixSocketPath(baseURL); ok {
 		// Unix socket path detected
-		unixSocket = baseURL
+		unixSocket = socketPath
 		// Use http://unix as the base URL (standard pattern for Unix socket HTTP clients)
 		baseURL = "http://unix"
 

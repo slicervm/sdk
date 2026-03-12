@@ -4,8 +4,60 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 )
+
+func TestNormalizeUnixSocketPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	tests := []struct {
+		name  string
+		input string
+		want  string
+		ok    bool
+	}{
+		{name: "absolute path", input: "/tmp/slicer.sock", want: "/tmp/slicer.sock", ok: true},
+		{name: "relative path", input: "./slicer.sock", want: "./slicer.sock", ok: true},
+		{name: "parent relative path", input: "../slicer.sock", want: "../slicer.sock", ok: true},
+		{name: "bare socket path", input: "slicer.sock", want: "slicer.sock", ok: true},
+		{name: "tilde socket path", input: "~/slicer.sock", want: filepath.Join(home, "slicer.sock"), ok: true},
+		{name: "unix scheme path", input: "unix:///tmp/slicer.sock", want: "/tmp/slicer.sock", ok: true},
+		{name: "http url", input: "http://127.0.0.1:8080", want: "", ok: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := normalizeUnixSocketPath(tt.input)
+			if ok != tt.ok {
+				t.Fatalf("normalizeUnixSocketPath(%q) ok = %v, want %v", tt.input, ok, tt.ok)
+			}
+			if got != tt.want {
+				t.Fatalf("normalizeUnixSocketPath(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNewSlicerClient_NormalizesUnixSocketPath(t *testing.T) {
+	home := t.TempDir()
+	originalHome := os.Getenv("HOME")
+	t.Setenv("HOME", home)
+	t.Cleanup(func() {
+		_ = os.Setenv("HOME", originalHome)
+	})
+
+	client := NewSlicerClient("unix://~/slicer.sock", "", "agent", nil)
+	want := filepath.Join(home, "slicer.sock")
+	if client.unixSocket != want {
+		t.Fatalf("client.unixSocket = %q, want %q", client.unixSocket, want)
+	}
+	if client.baseURL != "http://unix" {
+		t.Fatalf("client.baseURL = %q, want %q", client.baseURL, "http://unix")
+	}
+}
 
 func TestMakeRequest_AuthHeaderWithToken(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
