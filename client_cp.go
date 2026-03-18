@@ -220,9 +220,34 @@ func copyFromVMTar(ctx context.Context, c *SlicerClient, vmName, vmPath, localPa
 		return fmt.Errorf("failed to copy from VM: %s: %s", res.Status, string(body))
 	}
 
+	destDir, err := prepareLocalTarDestination(localPath)
+	if err != nil {
+		return err
+	}
+
 	uid, gid := getCurrentUIDGID()
 
-	return ExtractTarToPath(ctx, res.Body, localPath, uid, gid, excludePatterns...)
+	return ExtractTarToPath(ctx, res.Body, destDir, uid, gid, excludePatterns...)
+}
+
+func prepareLocalTarDestination(localPath string) (string, error) {
+	info, err := os.Stat(localPath)
+	if err == nil {
+		if !info.IsDir() {
+			return "", fmt.Errorf("destination must be a directory in tar mode: %s", localPath)
+		}
+		return localPath, nil
+	}
+
+	if !os.IsNotExist(err) {
+		return "", fmt.Errorf("failed to stat tar destination: %w", err)
+	}
+
+	if err := os.MkdirAll(localPath, 0o755); err != nil {
+		return "", fmt.Errorf("failed to create tar destination directory: %w", err)
+	}
+
+	return localPath, nil
 }
 
 func copyFromVMBinary(ctx context.Context, c *SlicerClient, vmName, vmPath, localPath string, permissions string) error {

@@ -107,6 +107,8 @@ When you want to host a "Service" or run a server, such as a Kubernetes cluster,
 | `Exec(ctx, hostname, request)` | Execute a command in a VM and stream output line-by-line | `ctx` (context.Context), `hostname` (string), `request` (SlicerExecRequest) | (chan SlicerExecWriteResult, error) |
 | `CpToVM(ctx, vmName, localPath, vmPath, uid, gid, permissions, mode)` | Upload a file/directory to a VM | `ctx` (context.Context), `vmName` (string), `localPath` (string), `vmPath` (string), `uid` (uint32), `gid` (uint32), `permissions` (string), `mode` (string: "tar" or "binary") | error |
 | `CpFromVM(ctx, vmName, vmPath, localPath, permissions, mode)` | Download a file/directory from a VM | `ctx` (context.Context), `vmName` (string), `vmPath` (string), `localPath` (string), `permissions` (string), `mode` (string: "tar" or "binary") | error |
+
+When `mode` is `tar`, `localPath` is treated as a directory destination and will be created automatically if it does not already exist.
 | `GetAgentHealth(ctx, hostname, includeStats)` | Check VM agent health and optionally get system stats | `ctx` (context.Context), `hostname` (string), `includeStats` (bool) | (*SlicerAgentHealthResponse, error) |
 
 #### Secret Management
