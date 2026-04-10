@@ -296,6 +296,35 @@ func (c *SlicerClient) CreateVM(ctx context.Context, groupName string, request S
 	return &result, nil
 }
 
+// RelaunchVM relaunches a known stopped persistent VM.
+func (c *SlicerClient) RelaunchVM(ctx context.Context, hostname string) (*SlicerCreateNodeResponse, error) {
+	endpoint := fmt.Sprintf("vm/%s/relaunch", hostname)
+	res, err := c.makeJSONRequestWithContext(ctx, http.MethodPost, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to relaunch VM: %w", err)
+	}
+
+	var body []byte
+	if res.Body != nil {
+		defer func() {
+			_, _ = io.Copy(io.Discard, res.Body)
+			_ = res.Body.Close()
+		}()
+		body, _ = io.ReadAll(res.Body)
+	}
+
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("API request failed: %s - %s", res.Status, string(body))
+	}
+
+	var result SlicerCreateNodeResponse
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &result, nil
+}
+
 // DeleteNode deletes a node from the specified host group
 func (c *SlicerClient) DeleteNode(groupName, nodeName string) error {
 	endpoint := fmt.Sprintf("hostgroup/%s/nodes/%s", groupName, nodeName)
