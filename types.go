@@ -11,15 +11,16 @@ const NonRootUser = uint32(math.MaxUint32)
 
 // SlicerNode represents a node managed by the slicer REST API.
 type SlicerNode struct {
-	Hostname  string    `json:"hostname"`
-	HostGroup string    `json:"hostgroup,omitempty"`
-	IP        string    `json:"ip"`
-	RamBytes  int64     `json:"ram_bytes,omitempty"` // RAM size in bytes
-	CPUs      int       `json:"cpus,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	Arch      string    `json:"arch,omitempty"`
-	Tags      []string  `json:"tags,omitempty"`
-	Status    string    `json:"status,omitempty"` // "Running" or "Paused"
+	Hostname   string    `json:"hostname"`
+	HostGroup  string    `json:"hostgroup,omitempty"`
+	IP         string    `json:"ip"`
+	RamBytes   int64     `json:"ram_bytes,omitempty"` // RAM size in bytes
+	CPUs       int       `json:"cpus,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	Arch       string    `json:"arch,omitempty"`
+	Tags       []string  `json:"tags,omitempty"`
+	Status     string    `json:"status,omitempty"` // "Running", "Paused", or "Stopped"
+	Persistent bool      `json:"persistent,omitempty"`
 }
 
 // SlicerCreateNodeRequest contains parameters for creating a node
