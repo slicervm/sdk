@@ -609,6 +609,101 @@ func (c *SlicerClient) Exec(ctx context.Context, nodeName string, execReq Slicer
 	return resChan, nil
 }
 
+// ExecBuffered executes a command and returns a single buffered result.
+// Unlike Exec, this method waits for process completion and returns a single
+// structured result suitable for non-streaming callers.
+func (c *SlicerClient) ExecBuffered(ctx context.Context, nodeName string, execReq SlicerExecRequest) (ExecResult, error) {
+	var result ExecResult
+
+	if execReq.Stdin {
+		return result, fmt.Errorf("stdin is not supported by ExecBuffered; use ExecWithReader instead")
+	}
+
+	command := execReq.Command
+	args := execReq.Args
+	uid := execReq.UID
+	gid := execReq.GID
+	shell := execReq.Shell
+	cwd := execReq.Cwd
+
+	q := url.Values{}
+	q.Set("cmd", command)
+
+	for _, arg := range args {
+		q.Add("args", arg)
+	}
+
+	for _, env := range execReq.Env {
+		q.Add("env", env)
+	}
+
+	if uid != NonRootUser {
+		q.Set("uid", strconv.FormatUint(uint64(uid), 10))
+	}
+	if gid != NonRootUser {
+		q.Set("gid", strconv.FormatUint(uint64(gid), 10))
+	}
+
+	if len(cwd) > 0 {
+		q.Set("cwd", cwd)
+	}
+
+	if len(execReq.Permissions) > 0 {
+		q.Set("permissions", execReq.Permissions)
+	}
+
+	if len(shell) > 0 {
+		q.Set("shell", shell)
+	}
+
+	q.Set("buffered", "true")
+
+	u, err := url.Parse(c.baseURL)
+	if err != nil {
+		return result, fmt.Errorf("failed to parse API URL: %w", err)
+	}
+	u.Path = fmt.Sprintf("/vm/%s/exec", nodeName)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), nil)
+	if err != nil {
+		return result, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.URL.RawQuery = q.Encode()
+
+	res, err := c.httpClient.Do(req)
+	if err != nil {
+		return result, fmt.Errorf("failed to execute request: %w", err)
+	}
+
+	if res.StatusCode != http.StatusOK {
+		var body []byte
+		if res.Body != nil {
+			defer func() {
+				_, _ = io.Copy(io.Discard, res.Body)
+				_ = res.Body.Close()
+			}()
+			body, _ = io.ReadAll(res.Body)
+		}
+		return result, fmt.Errorf("failed to execute command: %s %s", res.Status, string(body))
+	}
+
+	if res.Body == nil {
+		return result, fmt.Errorf("no body received from VM")
+	}
+	defer func() {
+		_, _ = io.Copy(io.Discard, res.Body)
+		_ = res.Body.Close()
+	}()
+
+	if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
+		return result, fmt.Errorf("failed to decode buffered exec response: %w", err)
+	}
+
+	return result, nil
+}
+
 // CpToVM copies files from a local path to a VM path.
 // The localPath can be a file or directory. The tar stream is created
 // internally and sent to the VM.

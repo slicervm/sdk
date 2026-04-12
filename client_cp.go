@@ -13,6 +13,8 @@ import (
 	"strings"
 )
 
+const fileModeHeader = "X-Slicer-FS-Mode"
+
 // getCurrentUIDGID returns the current user's UID and GID.
 // On Windows, returns 0,0 (chown operations will be skipped).
 func getCurrentUIDGID() (uid, gid uint32) {
@@ -251,21 +253,6 @@ func prepareLocalTarDestination(localPath string) (string, error) {
 }
 
 func copyFromVMBinary(ctx context.Context, c *SlicerClient, vmName, vmPath, localPath string, permissions string) error {
-	fileMode := os.FileMode(0600)
-	if len(permissions) > 0 {
-		permUint, err := strconv.ParseUint(permissions, 8, 32)
-		if err != nil {
-			return fmt.Errorf("invalid permissions format: %w", err)
-		}
-		fileMode = os.FileMode(permUint)
-	}
-
-	f, err := os.OpenFile(localPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, fileMode)
-	if err != nil {
-		return fmt.Errorf("failed to create local file: %w", err)
-	}
-	defer f.Close()
-
 	u, err := url.Parse(c.baseURL)
 	if err != nil {
 		return fmt.Errorf("failed to parse API URL: %w", err)
@@ -302,6 +289,25 @@ func copyFromVMBinary(ctx context.Context, c *SlicerClient, vmName, vmPath, loca
 		return fmt.Errorf("failed to copy from VM: %s: %s", res.Status, string(body))
 	}
 
+	fileMode := os.FileMode(0600)
+	if len(permissions) > 0 {
+		fileMode, err = parseFileMode(permissions)
+		if err != nil {
+			return fmt.Errorf("invalid permissions format: %w", err)
+		}
+	} else if mode := strings.TrimSpace(res.Header.Get(fileModeHeader)); mode != "" {
+		fileMode, err = parseFileMode(mode)
+		if err != nil {
+			return fmt.Errorf("invalid mode returned by server: %w", err)
+		}
+	}
+
+	f, err := os.OpenFile(localPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, fileMode)
+	if err != nil {
+		return fmt.Errorf("failed to create local file: %w", err)
+	}
+	defer f.Close()
+
 	if res.Body == nil {
 		return fmt.Errorf("no body received from VM")
 	}
@@ -311,4 +317,13 @@ func copyFromVMBinary(ctx context.Context, c *SlicerClient, vmName, vmPath, loca
 	}
 
 	return nil
+}
+
+func parseFileMode(permissions string) (os.FileMode, error) {
+	permUint, err := strconv.ParseUint(permissions, 8, 32)
+	if err != nil {
+		return 0, err
+	}
+
+	return os.FileMode(permUint), nil
 }

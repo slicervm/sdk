@@ -80,10 +80,23 @@ type SlicerHostGroup struct {
 // ExecWriteResult represents output from commands executing within a microVM.
 type SlicerExecWriteResult struct {
 	Timestamp time.Time `json:"timestamp"`
+	Type      string    `json:"type,omitempty"`
+	Pid       int       `json:"pid,omitempty"`
+	Data      string    `json:"data,omitempty"`
+	StartedAt time.Time `json:"started_at,omitempty"`
+	EndedAt   time.Time `json:"ended_at,omitempty"`
+	Signal    string    `json:"signal,omitempty"`
 	Stdout    string    `json:"stdout,omitempty"`
 	Stderr    string    `json:"stderr,omitempty"`
 	ExitCode  int       `json:"exit_code,omitempty"`
 	Error     string    `json:"error,omitempty"`
+}
+
+type ExecResult struct {
+	Stdout   string `json:"stdout"`
+	Stderr   string `json:"stderr"`
+	ExitCode int    `json:"exit_code"`
+	Error    string `json:"error,omitempty"`
 }
 
 // SlicerExecRequest contains parameters for invoking a command
@@ -106,6 +119,22 @@ type SlicerExecRequest struct {
 type SlicerCpRequest struct {
 	VM   string // VM name
 	Path string // Path on the VM
+}
+
+// SlicerFSInfo represents file system entry metadata returned by VM fs endpoints.
+type SlicerFSInfo struct {
+	Name  string    `json:"name"`
+	Type  string    `json:"type"`
+	Size  int64     `json:"size"`
+	Mtime time.Time `json:"mtime"`
+	Mode  string    `json:"mode"`
+}
+
+// SlicerFSMkdirRequest contains parameters for mkdir on a VM.
+type SlicerFSMkdirRequest struct {
+	Path      string `json:"path"`
+	Recursive bool   `json:"recursive,omitempty"`
+	Mode      string `json:"mode,omitempty"`
 }
 
 // SlicerNodeStat represents stats for a VM node

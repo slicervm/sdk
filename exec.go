@@ -461,14 +461,42 @@ func (c *RemoteCmd) processResults() {
 	var errorMsg string
 
 	for result := range c.resultChan {
+		switch result.Type {
+		case "started":
+			if result.Pid > 0 {
+				c.ProcessState = &RemoteProcessState{exited: false, pid: result.Pid}
+			}
+			continue
+		}
+
 		// Write stdout if present
-		if result.Stdout != "" && c.Stdout != nil {
-			c.Stdout.Write([]byte(result.Stdout))
+		stdoutData := result.Stdout
+		if stdoutData == "" && result.Data != "" {
+			stdoutData = result.Data
+		}
+		if result.Type == "stdout" || result.Type == "" {
+			if stdoutData != "" && c.Stdout != nil {
+				c.Stdout.Write([]byte(stdoutData))
+			}
 		}
 
 		// Write stderr if present
-		if result.Stderr != "" && c.Stderr != nil {
-			c.Stderr.Write([]byte(result.Stderr))
+		stderrData := result.Stderr
+		if stderrData == "" && result.Data != "" {
+			stderrData = result.Data
+		}
+		if result.Type == "stderr" || result.Type == "" {
+			if stderrData != "" && c.Stderr != nil {
+				c.Stderr.Write([]byte(stderrData))
+			}
+		}
+
+		// Exit frame carries command exit data.
+		if result.Type == "exit" {
+			if result.Pid > 0 {
+				// keep pid if we did not receive a started frame
+				c.ProcessState = &RemoteProcessState{exited: false, pid: result.Pid}
+			}
 		}
 
 		// Check for exit code
@@ -488,11 +516,18 @@ func (c *RemoteCmd) processResults() {
 		}
 	}
 
+	var pid int
+	pid = -1
+
 	// Create process state
+	if c.ProcessState != nil && c.ProcessState.pid > 0 {
+		pid = c.ProcessState.pid
+	}
+
 	c.ProcessState = &RemoteProcessState{
 		exitCode: exitCode,
 		exited:   true,
-		pid:      -1,
+		pid:      pid,
 	}
 
 	// Set wait error if there was a failure
