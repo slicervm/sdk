@@ -87,7 +87,8 @@ When you want to host a "Service" or run a server, such as a Kubernetes cluster,
 
 | Method | Description | Parameters | Returns |
 |--------|-------------|------------|---------|
-| `CreateVM(ctx, groupName, request)` | Create a new VM in a host group | `ctx` (context.Context), `groupName` (string), `request` (SlicerCreateNodeRequest) | (*SlicerCreateNodeResponse, error) |
+| `CreateVM(ctx, groupName, request)` | Create a new VM in a host group. The underlying `POST /hostgroup/{name}/nodes` endpoint accepts optional `?wait=agent` or `?wait=userdata` query params with a `?timeout=` (Go duration) to block until readiness; set `CreateOpts.Wait` / `CreateOpts.Timeout` on the request to use them. | `ctx` (context.Context), `groupName` (string), `request` (SlicerCreateNodeRequest) | (*SlicerCreateNodeResponse, error) |
+| `RelaunchVM(ctx, hostname)` | Relaunch a known stopped persistent VM (re-uses its disk image). | `ctx` (context.Context), `hostname` (string) | (*SlicerCreateNodeResponse, error) |
 | `DeleteVM(ctx, groupName, hostname)` | Delete a VM from a host group | `ctx` (context.Context), `groupName` (string), `hostname` (string) | (*SlicerDeleteResponse, error) |
 | `ListVMs(ctx)` | List all VMs across all host groups | `ctx` (context.Context) | ([]SlicerNode, error) |
 | `GetHostGroups(ctx)` | Fetch all host groups | `ctx` (context.Context) | ([]SlicerHostGroup, error) |
@@ -95,6 +96,8 @@ When you want to host a "Service" or run a server, such as a Kubernetes cluster,
 | `DeleteNode(groupName, nodeName)` | Delete a node from a host group | `groupName` (string), `nodeName` (string) | error |
 | `PauseVM(ctx, hostname)` | Pause a running VM to save CPU cost | `ctx` (context.Context), `hostname` (string) | error |
 | `ResumeVM(ctx, hostname)` | Resume a paused VM | `ctx` (context.Context), `hostname` (string) | error |
+| `SuspendVM(ctx, hostname)` | Suspend a running VM to disk via a Firecracker snapshot. Memory and disk state are saved; the VM is shut down. | `ctx` (context.Context), `hostname` (string) | error |
+| `RestoreVM(ctx, hostname)` | Restore a VM from its previously-taken Firecracker snapshot. | `ctx` (context.Context), `hostname` (string) | error |
 | `Shutdown(ctx, hostname, request)` | Shutdown or reboot a VM | `ctx` (context.Context), `hostname` (string), `request` (*SlicerShutdownRequest) | error |
 | `GetVMStats(ctx, hostname)` | Get CPU, memory, and disk statistics for a VM or all VMs | `ctx` (context.Context), `hostname` (string, empty for all) | ([]SlicerNodeStat, error) |
 | `GetVMLogs(ctx, hostname, lines)` | Get recent logs from a VM | `ctx` (context.Context), `hostname` (string), `lines` (int, -1 for all) | (*SlicerLogsResponse, error) |
@@ -104,12 +107,29 @@ When you want to host a "Service" or run a server, such as a Kubernetes cluster,
 
 | Method | Description | Parameters | Returns |
 |--------|-------------|------------|---------|
-| `Exec(ctx, hostname, request)` | Execute a command in a VM and stream output line-by-line | `ctx` (context.Context), `hostname` (string), `request` (SlicerExecRequest) | (chan SlicerExecWriteResult, error) |
+| `Exec(ctx, hostname, request)` | Execute a command in a VM and stream output line-by-line as NDJSON frames. Typed frames (`started`, `stdout`, `stderr`, `exit`) let callers measure process-start latency separately from first-byte latency. | `ctx` (context.Context), `hostname` (string), `request` (SlicerExecRequest) | (chan SlicerExecWriteResult, error) |
+| `ExecBuffered(ctx, hostname, request)` | Execute a command and wait for completion — a single buffered JSON result instead of the NDJSON stream. Use this when you don't need live output. Hits `POST /vm/{hostname}/exec?buffered=true`. `stdin` is not supported; use `ExecWithReader` for that. | `ctx` (context.Context), `hostname` (string), `request` (SlicerExecRequest) | (ExecResult, error) |
 | `CpToVM(ctx, vmName, localPath, vmPath, uid, gid, permissions, mode)` | Upload a file/directory to a VM | `ctx` (context.Context), `vmName` (string), `localPath` (string), `vmPath` (string), `uid` (uint32), `gid` (uint32), `permissions` (string), `mode` (string: "tar" or "binary") | error |
 | `CpFromVM(ctx, vmName, vmPath, localPath, permissions, mode)` | Download a file/directory from a VM | `ctx` (context.Context), `vmName` (string), `vmPath` (string), `localPath` (string), `permissions` (string), `mode` (string: "tar" or "binary") | error |
 
 When `mode` is `tar`, `localPath` is treated as a directory destination and will be created automatically if it does not already exist.
 | `GetAgentHealth(ctx, hostname, includeStats)` | Check VM agent health and optionally get system stats | `ctx` (context.Context), `hostname` (string), `includeStats` (bool) | (*SlicerAgentHealthResponse, error) |
+
+#### Filesystem Operations
+
+These methods hit native `/vm/{hostname}/fs/*` endpoints — preferred over
+shelling out through `Exec` because they don't depend on guest-side
+`ls`/`stat`/`mkdir`/`rm` and don't have shell-quoting hazards.
+
+| Method | Description | Parameters | Returns |
+|--------|-------------|------------|---------|
+| `ReadDir(ctx, vmName, path)` | List directory entries with typed metadata. | `ctx`, `vmName` (string), `path` (string) | ([]SlicerFSInfo, error) |
+| `Stat(ctx, vmName, path)` | Get a single file/directory entry; returns `os.ErrNotExist` on 404. | `ctx`, `vmName` (string), `path` (string) | (*SlicerFSInfo, error) |
+| `Exists(ctx, vmName, path)` | Convenience wrapper around `Stat`. | `ctx`, `vmName` (string), `path` (string) | (bool, error) |
+| `Mkdir(ctx, vmName, request)` | Create a directory (`recursive` + `mode` optional). | `ctx`, `vmName` (string), `request` (SlicerFSMkdirRequest) | error |
+| `Remove(ctx, vmName, path, recursive)` | Remove a file or directory. | `ctx`, `vmName` (string), `path` (string), `recursive` (bool) | error |
+| `ReadFile(ctx, vmName, vmPath)` | Download a single file's bytes plus its mode. | `ctx`, `vmName` (string), `vmPath` (string) | ([]byte, string, error) |
+| `WriteFile(ctx, vmName, vmPath, data, uid, gid, permissions)` | Upload a single file with a specific mode. | `ctx`, `vmName` (string), `vmPath` (string), `data` ([]byte), `uid`/`gid` (uint32), `permissions` (string) | error |
 
 #### Secret Management
 
