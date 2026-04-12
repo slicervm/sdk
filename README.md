@@ -90,14 +90,14 @@ When you want to host a "Service" or run a server, such as a Kubernetes cluster,
 | `CreateVM(ctx, groupName, request)` | Create a new VM in a host group. The underlying `POST /hostgroup/{name}/nodes` endpoint accepts optional `?wait=agent` or `?wait=userdata` query params with a `?timeout=` (Go duration) to block until readiness; set `CreateOpts.Wait` / `CreateOpts.Timeout` on the request to use them. | `ctx` (context.Context), `groupName` (string), `request` (SlicerCreateNodeRequest) | (*SlicerCreateNodeResponse, error) |
 | `RelaunchVM(ctx, hostname)` | Relaunch a known stopped persistent VM (re-uses its disk image). | `ctx` (context.Context), `hostname` (string) | (*SlicerCreateNodeResponse, error) |
 | `DeleteVM(ctx, groupName, hostname)` | Delete a VM from a host group | `ctx` (context.Context), `groupName` (string), `hostname` (string) | (*SlicerDeleteResponse, error) |
-| `ListVMs(ctx)` | List all VMs across all host groups | `ctx` (context.Context) | ([]SlicerNode, error) |
+| `ListVMs(ctx, opts...)` | List all VMs across all host groups. Pass an optional `ListOptions{Tag: "…"}` or `ListOptions{TagPrefix: "…"}` to filter server-side. | `ctx` (context.Context), `opts` (...ListOptions) | ([]SlicerNode, error) |
 | `GetHostGroups(ctx)` | Fetch all host groups | `ctx` (context.Context) | ([]SlicerHostGroup, error) |
-| `GetHostGroupNodes(ctx, groupName)` | Fetch nodes for a specific host group | `ctx` (context.Context), `groupName` (string) | ([]SlicerNode, error) |
+| `GetHostGroupNodes(ctx, groupName, opts...)` | Fetch nodes for a specific host group. Optional `ListOptions` filter works the same as `ListVMs`. | `ctx` (context.Context), `groupName` (string), `opts` (...ListOptions) | ([]SlicerNode, error) |
 | `DeleteNode(groupName, nodeName)` | Delete a node from a host group | `groupName` (string), `nodeName` (string) | error |
 | `PauseVM(ctx, hostname)` | Pause a running VM to save CPU cost | `ctx` (context.Context), `hostname` (string) | error |
 | `ResumeVM(ctx, hostname)` | Resume a paused VM | `ctx` (context.Context), `hostname` (string) | error |
-| `SuspendVM(ctx, hostname)` | Suspend a running VM to disk via a Firecracker snapshot. Memory and disk state are saved; the VM is shut down. | `ctx` (context.Context), `hostname` (string) | error |
-| `RestoreVM(ctx, hostname)` | Restore a VM from its previously-taken Firecracker snapshot. | `ctx` (context.Context), `hostname` (string) | error |
+| `SuspendVM(ctx, hostname)` | Suspend a running VM to disk via a Firecracker snapshot. Memory and disk state are saved; the VM is shut down. **Slicer-for-Mac only, for now** — the Linux daemon will return `501 Not Implemented`. | `ctx` (context.Context), `hostname` (string) | error |
+| `RestoreVM(ctx, hostname)` | Restore a VM from its previously-taken Firecracker snapshot. **Slicer-for-Mac only, for now.** | `ctx` (context.Context), `hostname` (string) | error |
 | `Shutdown(ctx, hostname, request)` | Shutdown or reboot a VM | `ctx` (context.Context), `hostname` (string), `request` (*SlicerShutdownRequest) | error |
 | `GetVMStats(ctx, hostname)` | Get CPU, memory, and disk statistics for a VM or all VMs | `ctx` (context.Context), `hostname` (string, empty for all) | ([]SlicerNodeStat, error) |
 | `GetVMLogs(ctx, hostname, lines)` | Get recent logs from a VM | `ctx` (context.Context), `hostname` (string), `lines` (int, -1 for all) | (*SlicerLogsResponse, error) |

@@ -48,6 +48,7 @@ func copyToVMBinary(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath
 	u.Path = fmt.Sprintf("/vm/%s/cp", vmName)
 	q := url.Values{}
 	q.Set("path", vmPath)
+	q.Set("mode", "binary")
 
 	uidAuto := uid == NonRootUser
 	gidAuto := gid == NonRootUser
@@ -121,6 +122,7 @@ func copyToVMTar(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath st
 
 	q := url.Values{}
 	q.Set("path", vmPath)
+	q.Set("mode", "tar")
 	if uid > 0 && uid != NonRootUser {
 		q.Set("uid", strconv.FormatUint(uint64(uid), 10))
 	}
@@ -180,6 +182,7 @@ func copyToVMTar(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath st
 func copyFromVMTar(ctx context.Context, c *SlicerClient, vmName, vmPath, localPath string, excludePatterns ...string) error {
 	q := url.Values{}
 	q.Set("path", vmPath)
+	q.Set("mode", "tar")
 	for _, pattern := range excludePatterns {
 		pattern = strings.TrimSpace(pattern)
 		if pattern == "" {
@@ -261,6 +264,7 @@ func copyFromVMBinary(ctx context.Context, c *SlicerClient, vmName, vmPath, loca
 	u.Path = fmt.Sprintf("/vm/%s/cp", vmName)
 	q := url.Values{}
 	q.Set("path", vmPath)
+	q.Set("mode", "binary")
 
 	u.RawQuery = q.Encode()
 

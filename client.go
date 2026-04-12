@@ -238,9 +238,44 @@ func (c *SlicerClient) GetHostGroups(ctx context.Context) ([]SlicerHostGroup, er
 	return hostGroups, nil
 }
 
-// GetHostGroupNodes fetches nodes for a specific host group
-func (c *SlicerClient) GetHostGroupNodes(ctx context.Context, groupName string) ([]SlicerNode, error) {
-	endpoint := fmt.Sprintf("hostgroup/%s/nodes", groupName)
+// ListOptions filters applied to node listing endpoints. Both `Tag` (exact
+// match) and `TagPrefix` are mutually exclusive — callers should set at
+// most one. An empty ListOptions (the zero value) applies no filter.
+type ListOptions struct {
+	// Tag matches nodes whose tags contain exactly this value.
+	Tag string
+	// TagPrefix matches nodes whose tags start with this value.
+	TagPrefix string
+}
+
+func (o ListOptions) query() string {
+	q := url.Values{}
+	if o.Tag != "" {
+		q.Set("tag", o.Tag)
+	}
+	if o.TagPrefix != "" {
+		q.Set("tag_prefix", o.TagPrefix)
+	}
+	if len(q) == 0 {
+		return ""
+	}
+	return "?" + q.Encode()
+}
+
+// firstListOption returns the first ListOptions in the variadic slice, or
+// a zero value if none was supplied.
+func firstListOption(opts []ListOptions) ListOptions {
+	if len(opts) == 0 {
+		return ListOptions{}
+	}
+	return opts[0]
+}
+
+// GetHostGroupNodes fetches nodes for a specific host group. Optional
+// filters (tag / tag_prefix) may be supplied; only the first opts entry is
+// honored.
+func (c *SlicerClient) GetHostGroupNodes(ctx context.Context, groupName string, opts ...ListOptions) ([]SlicerNode, error) {
+	endpoint := fmt.Sprintf("hostgroup/%s/nodes%s", groupName, firstListOption(opts).query())
 	res, err := c.makeJSONRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch nodes: %w", err)
@@ -856,14 +891,18 @@ func (c *SlicerClient) GetVMLogs(ctx context.Context, hostname string, lines int
 	return &logsRes, nil
 }
 
-// ListVMs fetches all VMs (nodes)
-func (c *SlicerClient) ListVMs(ctx context.Context) ([]SlicerNode, error) {
+// ListVMs fetches all VMs (nodes). Optional filters (tag / tag_prefix) may
+// be supplied; only the first opts entry is honored.
+func (c *SlicerClient) ListVMs(ctx context.Context, opts ...ListOptions) ([]SlicerNode, error) {
 	u, err := url.Parse(c.baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse API URL: %w", err)
 	}
 
 	u.Path = "/nodes"
+	if qs := firstListOption(opts).query(); qs != "" {
+		u.RawQuery = strings.TrimPrefix(qs, "?")
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
