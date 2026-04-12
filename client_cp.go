@@ -13,7 +13,7 @@ import (
 	"strings"
 )
 
-const fileModeHeader = "X-Slicer-FS-Mode"
+const fileModeHeader = "X-Slicer-File-Mode"
 
 // getCurrentUIDGID returns the current user's UID and GID.
 // On Windows, returns 0,0 (chown operations will be skipped).
