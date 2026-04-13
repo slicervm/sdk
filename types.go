@@ -107,7 +107,7 @@ type SlicerExecWriteResult struct {
 	Signal    string    `json:"signal,omitempty"`
 	Stdout    string    `json:"stdout,omitempty"`
 	Stderr    string    `json:"stderr,omitempty"`
-	ExitCode  int       `json:"exit_code,omitempty"`
+	ExitCode  int       `json:"exit_code"`
 	Error     string    `json:"error,omitempty"`
 }
 
@@ -119,7 +119,7 @@ type ExecResult struct {
 	StartedAt time.Time `json:"started_at,omitempty,omitzero"`
 	EndedAt   time.Time `json:"ended_at,omitempty,omitzero"`
 	Signal    string    `json:"signal,omitempty"`
-	ExitCode  int       `json:"exit_code,omitempty"`
+	ExitCode  int       `json:"exit_code"`
 	Error     string    `json:"error,omitempty"`
 }
 

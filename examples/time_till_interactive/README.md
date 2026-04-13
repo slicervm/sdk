@@ -5,6 +5,8 @@ This example measures:
 - creates a VM with `CreateVMWithOptions` (server-side readiness via `wait=agent` by default)
 - waits until the VM is ready (`tti`)
 - runs `echo ready` using `ExecBuffered` and measures first-command latency
+- uses the SDK's default `stdio=base64` exec mode; the SDK decodes stdout
+  before returning it
 - Prints:
   - `create_to_ready`
   - `exec_latency`

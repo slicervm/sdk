@@ -112,6 +112,11 @@ When you want to host a "Service" or run a server, such as a Kubernetes cluster,
 | `CpToVM(ctx, vmName, localPath, vmPath, uid, gid, permissions, mode)` | Upload a file/directory to a VM | `ctx` (context.Context), `vmName` (string), `localPath` (string), `vmPath` (string), `uid` (uint32), `gid` (uint32), `permissions` (string), `mode` (string: "tar" or "binary") | error |
 | `CpFromVM(ctx, vmName, vmPath, localPath, permissions, mode)` | Download a file/directory from a VM | `ctx` (context.Context), `vmName` (string), `vmPath` (string), `localPath` (string), `permissions` (string), `mode` (string: "tar" or "binary") | error |
 
+Exec requests made through the SDK default to `stdio=base64` so stdout/stderr
+are binary-safe. The SDK decodes those frames before returning data or writing
+to `RemoteCmd.Stdout` / `RemoteCmd.Stderr`. Set `SlicerExecRequest.Stdio` to
+`ExecStdioText` only when you explicitly want raw readable NDJSON frames.
+
 When `mode` is `tar`, `localPath` is treated as a directory destination and will be created automatically if it does not already exist.
 | `GetAgentHealth(ctx, hostname, includeStats)` | Check VM agent health and optionally get system stats | `ctx` (context.Context), `hostname` (string), `includeStats` (bool) | (*SlicerAgentHealthResponse, error) |
 

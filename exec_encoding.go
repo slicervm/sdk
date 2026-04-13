@@ -14,6 +14,9 @@ const (
 func setExecStdioQuery(q url.Values, execReq SlicerExecRequest) error {
 	stdio := execReq.Stdio
 	if stdio == "" {
+		// The raw HTTP API defaults omitted stdio to text for existing clients.
+		// The SDK opts into base64 by default so Exec/RemoteCmd can safely
+		// stream arbitrary binary stdout/stderr and decode it before returning.
 		stdio = ExecStdioBase64
 	}
 
