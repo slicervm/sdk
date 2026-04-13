@@ -7,7 +7,7 @@ SDK for [SlicerVM.com](https://slicervm.com)
 - [Installation](#installation)
 - [Features](#features)
 - [Connecting to UNIX Sockets](#connecting-to-unix-sockets)
-- [Port Forwarding with UNIX Sockets](#port-forwarding-with-unix-sockets)
+- [Port Forwarding](#port-forwarding)
 - [Pause and Resume VMs](#pause-and-resume-vms)
 - [SDK Methods Reference](#sdk-methods-reference)
   - [VM Operations](#vm-operations)
@@ -46,15 +46,52 @@ hostGroups, err := client.GetHostGroups(ctx)
 
 The client automatically detects UNIX socket paths (starting with `/` or `./`) and configures the HTTP transport accordingly.
 
-### Port Forwarding with UNIX Sockets
+### Port Forwarding
 
-Bidirectional port forwarding now supports UNIX sockets on either side or both. Forward local or remote TCP ports and UNIX sockets in any combination.
+The `github.com/slicervm/sdk/forward` subpackage opens host → VM tunnels from Go. Each accepted local connection gets its own WebSocket to the daemon; the daemon dials the upstream target inside the guest. Same spec syntax as `slicer vm forward -L`.
 
-For now you need to use the CLI and an "exec" to access port-forwarding.
+```go
+import (
+    slicer "github.com/slicervm/sdk"
+    "github.com/slicervm/sdk/forward"
+)
 
-You can also use SSH tunnels via Go code, if you have SSH in your microVMs.
+fwd, err := forward.Start(ctx, forward.Options{
+    BaseURL: os.Getenv("SLICER_URL"),   // http(s)://… or /path/to/slicer.sock
+    Token:   os.Getenv("SLICER_TOKEN"), // optional for unix sockets with no auth
+    VMName:  node.Hostname,
+    Specs: []string{
+        "127.0.0.1:8080:127.0.0.1:80",            // TCP → TCP
+        "2375:/var/run/docker.sock",              // TCP → Unix socket in guest
+        "/tmp/docker.sock:/var/run/docker.sock",  // Unix → Unix
+    },
+})
+if err != nil { log.Fatal(err) }
+defer fwd.Close()
+
+for _, ln := range fwd.Listeners() {
+    log.Printf("forward: %s → %s", ln.Local, ln.Remote)
+}
+
+// Listeners are bound and serving; make host-side requests now.
+resp, _ := http.Get("http://127.0.0.1:8080/")
+```
+
+Supported `-L` formats (mirrors the CLI):
+
+| Spec | Listen | Upstream |
+|------|--------|----------|
+| `127.0.0.1:9000`                           | `127.0.0.1:9000` TCP  | `127.0.0.1:9000` TCP |
+| `9001:127.0.0.1:9000`                      | `0.0.0.0:9001` TCP    | `127.0.0.1:9000` TCP |
+| `0:127.0.0.1:9000`                         | random TCP port       | `127.0.0.1:9000` TCP |
+| `0.0.0.0:9000:127.0.0.1:9000`              | `0.0.0.0:9000` TCP    | `127.0.0.1:9000` TCP |
+| `127.0.0.1:9000:/var/run/docker.sock`      | `127.0.0.1:9000` TCP  | `unix:/var/run/docker.sock` |
+| `9000:/var/run/docker.sock`                | `0.0.0.0:9000` TCP    | `unix:/var/run/docker.sock` |
+| `/tmp/docker.sock:/var/run/docker.sock`    | Unix socket           | `unix:/var/run/docker.sock` |
 
 **Supported on**: Linux, Darwin, and WSL.
+
+See [`examples/nginx/main.go`](examples/nginx/main.go) for a runnable end-to-end demo.
 
 ### Pause and Resume VMs
 
@@ -160,6 +197,7 @@ Each example is its own module requiring `github.com/slicervm/sdk v0.0.42` with 
 * [Create a VM with Claude Code and run a headless inference](examples/claude/main.go)
 * [Upload a file to process in VM, download the results](examples/transform/main.go)
 * [Measure time to first interactive exec](examples/time_till_interactive/main.go)
+* [Install nginx and port-forward port 80 to the host](examples/nginx/main.go)
 
 ### E2E benchmark notes (unix socket + devmapper + --min)
 
