@@ -304,8 +304,51 @@ func (c *SlicerClient) GetHostGroupNodes(ctx context.Context, groupName string, 
 
 // CreateVM creates a new VM in the specified host group
 func (c *SlicerClient) CreateVM(ctx context.Context, groupName string, request SlicerCreateNodeRequest) (*SlicerCreateNodeResponse, error) {
+	return c.CreateVMWithOptions(ctx, groupName, request, SlicerCreateNodeOptions{})
+}
+
+// CreateVMWithOptions creates a new VM in the specified host group with optional wait/query behavior.
+func (c *SlicerClient) CreateVMWithOptions(ctx context.Context, groupName string, request SlicerCreateNodeRequest, options SlicerCreateNodeOptions) (*SlicerCreateNodeResponse, error) {
 	endpoint := fmt.Sprintf("hostgroup/%s/nodes", groupName)
-	res, err := c.makeJSONRequestWithContext(ctx, http.MethodPost, endpoint, request)
+	reqURL, err := url.Parse(c.baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid base URL: %w", err)
+	}
+	reqURL.Path = path.Join(reqURL.Path, endpoint)
+
+	query := url.Values{}
+	if options.Wait != "" {
+		switch options.Wait {
+		case SlicerCreateNodeWaitAgent, SlicerCreateNodeWaitUserdata:
+			query.Set("wait", string(options.Wait))
+		default:
+			return nil, fmt.Errorf("invalid wait value: %q", options.Wait)
+		}
+	}
+	if options.Timeout > 0 {
+		query.Set("timeout", options.Timeout.String())
+	}
+	reqURL.RawQuery = query.Encode()
+
+	requestBody, err := json.Marshal(request)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL.String(), bytes.NewReader(requestBody))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create node: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	if c.userAgent != "" {
+		req.Header.Set("User-Agent", c.userAgent)
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	res, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create node: %w", err)
 	}
@@ -348,7 +391,7 @@ func (c *SlicerClient) RelaunchVM(ctx context.Context, hostname string) (*Slicer
 		body, _ = io.ReadAll(res.Body)
 	}
 
-	if res.StatusCode != http.StatusOK {
+	if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusCreated {
 		return nil, fmt.Errorf("API request failed: %s - %s", res.Status, string(body))
 	}
 
@@ -510,6 +553,9 @@ func (c *SlicerClient) Exec(ctx context.Context, nodeName string, execReq Slicer
 
 	q := url.Values{}
 	q.Set("cmd", command)
+	if err := setExecStdioQuery(q, execReq); err != nil {
+		return resChan, err
+	}
 
 	for _, arg := range args {
 		q.Add("args", arg)
@@ -615,6 +661,13 @@ func (c *SlicerClient) Exec(ctx context.Context, nodeName string, execReq Slicer
 				}
 				return
 			}
+			if err := decodeExecWriteResult(&result); err != nil {
+				resChan <- SlicerExecWriteResult{
+					Timestamp: result.Timestamp,
+					Error:     err.Error(),
+				}
+				return
+			}
 
 			if result.Error != "" {
 				resChan <- SlicerExecWriteResult{
@@ -663,6 +716,9 @@ func (c *SlicerClient) ExecBuffered(ctx context.Context, nodeName string, execRe
 
 	q := url.Values{}
 	q.Set("cmd", command)
+	if err := setExecStdioQuery(q, execReq); err != nil {
+		return result, err
+	}
 
 	for _, arg := range args {
 		q.Add("args", arg)
@@ -734,6 +790,9 @@ func (c *SlicerClient) ExecBuffered(ctx context.Context, nodeName string, execRe
 
 	if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
 		return result, fmt.Errorf("failed to decode buffered exec response: %w", err)
+	}
+	if err := decodeExecResult(&result); err != nil {
+		return result, err
 	}
 
 	return result, nil

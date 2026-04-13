@@ -38,6 +38,24 @@ type SlicerCreateNodeRequest struct {
 	Secrets    []string `json:"secrets,omitempty"`
 }
 
+// SlicerCreateNodeWaitFor controls how far the server should wait before returning.
+type SlicerCreateNodeWaitFor string
+
+const (
+	// SlicerCreateNodeWaitAgent returns once the guest agent is reachable.
+	SlicerCreateNodeWaitAgent SlicerCreateNodeWaitFor = "agent"
+	// SlicerCreateNodeWaitUserdata returns once agent readiness and userdata completion are observed.
+	SlicerCreateNodeWaitUserdata SlicerCreateNodeWaitFor = "userdata"
+)
+
+// SlicerCreateNodeOptions allows typed create query params.
+type SlicerCreateNodeOptions struct {
+	// Wait controls server-side readiness waiting (agent/userdata). Empty means no wait.
+	Wait SlicerCreateNodeWaitFor `json:"-"`
+	// Timeout is optional wait timeout when Wait is set. Parsed as Go duration.
+	Timeout time.Duration `json:"-"`
+}
+
 // MB converts megabytes to bytes
 func MiB(mb int64) int64 {
 	return mb * 1024 * 1024
@@ -79,12 +97,13 @@ type SlicerHostGroup struct {
 
 // ExecWriteResult represents output from commands executing within a microVM.
 type SlicerExecWriteResult struct {
-	Timestamp time.Time `json:"timestamp"`
+	Timestamp time.Time `json:"timestamp,omitempty,omitzero"`
 	Type      string    `json:"type,omitempty"`
 	Pid       int       `json:"pid,omitempty"`
+	Encoding  string    `json:"encoding,omitempty"`
 	Data      string    `json:"data,omitempty"`
-	StartedAt time.Time `json:"started_at,omitempty"`
-	EndedAt   time.Time `json:"ended_at,omitempty"`
+	StartedAt time.Time `json:"started_at,omitempty,omitzero"`
+	EndedAt   time.Time `json:"ended_at,omitempty,omitzero"`
 	Signal    string    `json:"signal,omitempty"`
 	Stdout    string    `json:"stdout,omitempty"`
 	Stderr    string    `json:"stderr,omitempty"`
@@ -93,10 +112,15 @@ type SlicerExecWriteResult struct {
 }
 
 type ExecResult struct {
-	Stdout   string `json:"stdout"`
-	Stderr   string `json:"stderr"`
-	ExitCode int    `json:"exit_code"`
-	Error    string `json:"error,omitempty"`
+	Stdout    string    `json:"stdout,omitempty"`
+	Stderr    string    `json:"stderr,omitempty"`
+	Encoding  string    `json:"encoding,omitempty"`
+	Pid       int       `json:"pid,omitempty"`
+	StartedAt time.Time `json:"started_at,omitempty,omitzero"`
+	EndedAt   time.Time `json:"ended_at,omitempty,omitzero"`
+	Signal    string    `json:"signal,omitempty"`
+	ExitCode  int       `json:"exit_code,omitempty"`
+	Error     string    `json:"error,omitempty"`
 }
 
 // SlicerExecRequest contains parameters for invoking a command
@@ -110,6 +134,7 @@ type SlicerExecRequest struct {
 	Stdin       bool     `json:"stdin,omitempty"`
 	Stdout      bool     `json:"stdout,omitempty"`
 	Stderr      bool     `json:"stderr,omitempty"`
+	Stdio       string   `json:"stdio,omitempty"`
 	Shell       string   `json:"shell,omitempty"`
 	Cwd         string   `json:"cwd,omitempty"`
 	Permissions string   `json:"permissions,omitempty"`

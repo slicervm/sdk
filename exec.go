@@ -559,6 +559,9 @@ func (c *SlicerClient) ExecWithReader(ctx context.Context, nodeName string, exec
 
 	q := url.Values{}
 	q.Set("cmd", command)
+	if err := setExecStdioQuery(q, execReq); err != nil {
+		return resChan, err
+	}
 
 	for _, arg := range args {
 		q.Add("args", arg)
@@ -644,6 +647,7 @@ func (c *SlicerClient) ExecWithReader(ctx context.Context, nodeName string, exec
 				if len(line) > 0 {
 					var result SlicerExecWriteResult
 					if jsonErr := json.Unmarshal(line, &result); jsonErr == nil {
+						_ = decodeExecWriteResult(&result)
 						resChan <- result
 					}
 				}
@@ -663,6 +667,13 @@ func (c *SlicerClient) ExecWithReader(ctx context.Context, nodeName string, exec
 				resChan <- SlicerExecWriteResult{
 					Timestamp: result.Timestamp,
 					Error:     fmt.Sprintf("failed to decode response: %v", err),
+				}
+				return
+			}
+			if err := decodeExecWriteResult(&result); err != nil {
+				resChan <- SlicerExecWriteResult{
+					Timestamp: result.Timestamp,
+					Error:     err.Error(),
 				}
 				return
 			}
