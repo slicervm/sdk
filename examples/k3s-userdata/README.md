@@ -1,10 +1,10 @@
 # k3s-userdata example
 
-This example demonstrates creating a VM, installing k3s via user-data, waiting for cluster readiness, and exporting kubeconfig.
+This example demonstrates creating a VM with server-side `wait=userdata`, installing k3s via user-data, verifying cluster readiness, and exporting kubeconfig.
 
 What it does:
 
-- Creates a 2 vCPU / 4 GiB VM in the `vm` host group with `k3sup` install/userdata and blocks until userdata is complete
+- Creates a 2 vCPU / 4 GiB VM in the `vm` host group with `CreateVMWithOptions(... WaitUserdata ...)`
 - Tags the VM with `example=k3s-<unix timestamp>` unless `K3S_TAG` is set
 - Verifies `kubectl get nodes` with UID 1000 after server-side userdata readiness returns
 - Logs progress and includes VM log excerpts if readiness is slow or fails

@@ -107,7 +107,7 @@ func main() {
 	defer execCancel()
 
 	kubeStart := time.Now()
-	log.Printf("waiting for userdata/k3s readiness via kubectl timeout=12m hostname=%s", node.Hostname)
+	log.Printf("verifying k3s after server-side userdata wait timeout=12m hostname=%s", node.Hostname)
 	out, err := waitForKubectlNodes(execCtx, client, hostGroup, node.Hostname, tag, 1000)
 	if err != nil {
 		fmt.Printf("kubectl check failed: %v\n", err)
