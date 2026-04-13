@@ -151,6 +151,42 @@ shelling out through `Exec` because they don't depend on guest-side
 * [Create a VM with k3s installed via Userdata](examples/k3s-userdata/main.go)s
 * [Create a VM with claude code and run a headless inference](examples/claude/main.go)
 * [Upload a file to process in VM, download the results](examples/transform/main.go)
+* [Measure time to first interactive exec](examples/time_till_interactive/main.go)
+
+### E2E benchmark notes (unix socket + devmapper + --min)
+
+Use this for local benchmark/e2e runs on a dedicated daemon:
+
+```bash
+SLICER_BIN=${SLICER_BIN:-./path/to/slicer/bin/slicer}
+
+cd /tmp
+mkdir -p /tmp/sdk-e2e
+$SLICER_BIN new timetti \
+  --min \
+  --count=0 \
+  --storage=devmapper \
+  --net=isolated \
+  --api-bind /tmp/slicer-e2e.sock \
+  > /tmp/sdk-e2e/slicer.yaml
+$SLICER_BIN up /tmp/sdk-e2e/slicer.yaml > /tmp/sdk-e2e/slicer.log 2>&1 &
+```
+
+Then run the example:
+
+```bash
+SLICER_URL=/tmp/slicer-e2e.sock \
+SLICER_HOST_GROUP=timetti \
+SLICER_CREATE_WAIT=agent \
+SLICER_CREATE_TIMEOUT=120s \
+go run ./examples/time_till_interactive
+```
+
+Cleanup:
+
+```bash
+sudo kill -INT $(pgrep -f "/bin/slicer up /tmp/sdk-e2e/slicer.yaml")
+```
 
 ### Quick start
 
