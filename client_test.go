@@ -1,12 +1,15 @@
 package slicer
 
 import (
+	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestNormalizeUnixSocketPath(t *testing.T) {
@@ -209,5 +212,59 @@ func TestMakeRequest_InvalidBaseURL(t *testing.T) {
 
 	if err == nil {
 		t.Error("Want error, got nil")
+	}
+}
+
+func TestCreateVMWithOptions_WaitQuery(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("Want %s method, got %s", http.MethodPost, r.Method)
+		}
+		if r.URL.Path != "/hostgroup/vm/nodes" {
+			t.Fatalf("Want path /hostgroup/vm/nodes, got %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("wait"); got != "agent" {
+			t.Fatalf("Want wait=agent, got %q", got)
+		}
+		if got := r.URL.Query().Get("timeout"); got != "2m0s" {
+			t.Fatalf("Want timeout=2m0s, got %q", got)
+		}
+
+		var body SlicerCreateNodeRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("failed to decode request body: %v", err)
+		}
+		if len(body.Tags) != 1 || body.Tags[0] != "e2e" {
+			t.Fatalf("Want tag e2e, got %#v", body.Tags)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = io.WriteString(w, `{"hostname":"vm-1","ip":"192.168.1.10/24","created_at":"2026-04-13T10:09:25Z","arch":"arm64"}`)
+	}))
+	defer server.Close()
+
+	client := NewSlicerClient(server.URL, "token", "test-agent", nil)
+	resp, err := client.CreateVMWithOptions(context.Background(), "vm", SlicerCreateNodeRequest{
+		Tags: []string{"e2e"},
+	}, SlicerCreateNodeOptions{
+		Wait:    SlicerCreateNodeWaitAgent,
+		Timeout: 2 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("CreateVMWithOptions() failed: %v", err)
+	}
+	if resp.Hostname != "vm-1" || resp.Arch != "arm64" {
+		t.Fatalf("unexpected response: %#v", resp)
+	}
+}
+
+func TestCreateVMWithOptions_InvalidWait(t *testing.T) {
+	client := NewSlicerClient("http://unused", "token", "test-agent", nil)
+	_, err := client.CreateVMWithOptions(context.Background(), "vm", SlicerCreateNodeRequest{}, SlicerCreateNodeOptions{
+		Wait: SlicerCreateNodeWaitFor("ready"),
+	})
+	if err == nil {
+		t.Fatal("Want invalid wait error, got nil")
 	}
 }

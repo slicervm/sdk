@@ -36,7 +36,7 @@ func main() {
 	baseURL := resolveBaseURL() // Override via SLICER_URL if needed.
 	token := os.Getenv("SLICER_TOKEN")
 	hostGroup := envOrDefault("SLICER_HOST_GROUP", "vm")
-	tag := envOrDefault("K3S_TAG", fmt.Sprintf("k3s-%d", time.Now().Unix()))
+	tag := envOrDefault("K3S_TAG", fmt.Sprintf("example=k3s-%d", time.Now().Unix()))
 
 	if token == "" && !isUnixSocket(baseURL) {
 		fmt.Println("SLICER_TOKEN is required")
@@ -54,37 +54,32 @@ func main() {
 		fmt.Printf("using configured host group: %s\n", hostGroup)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
 	defer cancel()
 
 	createStart := time.Now()
-	node, err := client.CreateVM(ctx, hostGroup, slicer.SlicerCreateNodeRequest{
+	node, err := client.CreateVMWithOptions(ctx, hostGroup, slicer.SlicerCreateNodeRequest{
 		Userdata: setupUserdata,
 		Tags:     []string{tag},
+	}, slicer.SlicerCreateNodeOptions{
+		Wait:    slicer.SlicerCreateNodeWaitUserdata,
+		Timeout: 12 * time.Minute,
 	})
 	if err != nil {
 		fmt.Printf("create VM failed: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("phase=create_vm_ms elapsed=%d\n", time.Since(createStart).Milliseconds())
+	fmt.Printf("phase=create_ready_vm_ms elapsed=%d\n", time.Since(createStart).Milliseconds())
 
 	nodeIP, err := parseNodeIP(node.IP)
 	if err != nil {
 		fmt.Printf("warning: could not parse VM ip (%s): %v\n", node.IP, err)
 	}
 
-	fmt.Printf("created VM: hostname=%s ip=%s tag=%s\n", node.Hostname, node.IP, tag)
+	fmt.Printf("created ready VM: hostname=%s ip=%s tag=%s\n", node.Hostname, node.IP, tag)
 
 	execCtx, execCancel := context.WithTimeout(context.Background(), 12*time.Minute)
 	defer execCancel()
-
-	readyStart := time.Now()
-	err = waitForVMUserdataReady(execCtx, client, node.Hostname)
-	if err != nil {
-		fmt.Printf("VM not ready yet: %v\n", err)
-		os.Exit(1)
-	}
-	fmt.Printf("phase=wait_agent_ready_ms elapsed=%d\n", time.Since(readyStart).Milliseconds())
 
 	kubeStart := time.Now()
 	out, err := waitForKubectlNodes(execCtx, client, node.Hostname, 1000)
@@ -140,34 +135,6 @@ func waitForKubectlNodes(ctx context.Context, client *slicer.SlicerClient, nodeN
 		case <-time.After(retryDelay):
 		case <-ctx.Done():
 			return "", ctx.Err()
-		}
-	}
-}
-
-func waitForVMUserdataReady(ctx context.Context, client *slicer.SlicerClient, nodeName string) error {
-	retryDelay := 250 * time.Millisecond
-	for attempt := 1; ; attempt++ {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-
-		health, err := client.GetAgentHealth(ctx, nodeName, true)
-		if err != nil {
-			if attempt == 1 || attempt%20 == 0 {
-				fmt.Printf("attempt %d: VM not ready yet (%v)\n", attempt, err)
-			}
-		} else if !health.UserdataRan {
-			if attempt == 1 || attempt%20 == 0 {
-				fmt.Printf("attempt %d: user-data not complete yet for %s\n", attempt, nodeName)
-			}
-		} else {
-			return nil
-		}
-
-		select {
-		case <-time.After(retryDelay):
-		case <-ctx.Done():
-			return ctx.Err()
 		}
 	}
 }

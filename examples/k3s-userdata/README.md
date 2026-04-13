@@ -4,9 +4,8 @@ This example demonstrates creating a VM, installing k3s via user-data, waiting f
 
 What it does:
 
-- Creates a VM in the `vm` host group with `k3sup` install/userdata
-- Tags the VM with `K3S_TAG` (or timestamp fallback)
-- Waits for the agent to become healthy
+- Creates a VM in the `vm` host group with `k3sup` install/userdata and blocks until user-data is complete
+- Tags the VM with `example=k3s-<unix timestamp>` unless `K3S_TAG` is set
 - Polls `kubectl get nodes` with UID 1000
 - Copies kubeconfig back locally and rewrites `127.0.0.1`/`localhost` to the VM IP
 
@@ -14,8 +13,10 @@ Run:
 
 ```bash
 SLICER_URL=~/slicer-mac/slicer.sock \
-go run ./examples/k3s-userdata
+go run .
 ```
+
+Run from this directory. The example module requires `github.com/slicervm/sdk v0.0.42` and uses `replace github.com/slicervm/sdk => ../../` so local SDK changes are used.
 
 The example probes `slicer` via the SDK `/info` endpoint. If the daemon reports `platform=darwin`, it always uses the `sbox` hostgroup.
 
@@ -23,7 +24,7 @@ Optional overrides:
 
 - For remote authenticated slicer instances, add `SLICER_TOKEN`.
 - `SLICER_HOST_GROUP` (default: `vm`)
-- `K3S_TAG` (default: `k3s-<unix timestamp>`)
+- `K3S_TAG` (default: `example=k3s-<unix timestamp>`, use `key=value` form)
 - `SLICER_NODE_IP` (optional override if API-provided IP parsing fails)
 
 Output includes:

@@ -20,7 +20,7 @@ func main() {
 	baseURL := envOrDefault("SLICER_URL", "http://192.168.1.34:8080")
 	token := os.Getenv("SLICER_TOKEN")
 	hostGroup := envOrDefault("SLICER_HOST_GROUP", "vm")
-	tag := envOrDefault("FILE_TRANSFER_TAG", fmt.Sprintf("file-transfer-%d", time.Now().Unix()))
+	tag := envOrDefault("FILE_TRANSFER_TAG", fmt.Sprintf("example=transform-%d", time.Now().Unix()))
 	inputContent := envOrDefault("FILE_TRANSFER_INPUT", sampleInput)
 	outputName := envOrDefault("FILE_TRANSFER_OUTPUT", "processed.txt")
 
@@ -31,26 +31,24 @@ func main() {
 
 	client := slicer.NewSlicerClient(baseURL, token, "slicer-file-transfer/1.0", nil)
 
-	createCtx, createCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	createCtx, createCancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer createCancel()
 
-	node, err := client.CreateVM(createCtx, hostGroup, slicer.SlicerCreateNodeRequest{
+	node, err := client.CreateVMWithOptions(createCtx, hostGroup, slicer.SlicerCreateNodeRequest{
 		Tags: []string{tag},
+	}, slicer.SlicerCreateNodeOptions{
+		Wait:    slicer.SlicerCreateNodeWaitAgent,
+		Timeout: 2 * time.Minute,
 	})
 	if err != nil {
 		fmt.Printf("create VM failed: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("created VM: hostname=%s ip=%s tag=%s\n", node.Hostname, node.IP, tag)
+	fmt.Printf("created ready VM: hostname=%s ip=%s tag=%s\n", node.Hostname, node.IP, tag)
 
 	execCtx, execCancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer execCancel()
-
-	if err := waitForVMReady(execCtx, client, node.Hostname); err != nil {
-		fmt.Printf("VM not ready yet: %v\n", err)
-		os.Exit(1)
-	}
 
 	localInput := "input-" + node.Hostname + ".txt"
 	if err := os.WriteFile(localInput, []byte(inputContent), 0o600); err != nil {
@@ -95,29 +93,6 @@ func main() {
 			os.Exit(1)
 		}
 		fmt.Printf("also written to: ./%s\n", outputName)
-	}
-}
-
-func waitForVMReady(ctx context.Context, client *slicer.SlicerClient, nodeName string) error {
-	retryDelay := 10 * time.Millisecond
-	for attempt := 1; ; attempt++ {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-
-		if _, err := client.GetAgentHealth(ctx, nodeName, false); err == nil {
-			return nil
-		}
-
-		if attempt%5 == 0 {
-			fmt.Printf("attempt %d: VM not ready yet\n", attempt)
-		}
-
-		select {
-		case <-time.After(retryDelay):
-		case <-ctx.Done():
-			return ctx.Err()
-		}
 	}
 }
 

@@ -87,7 +87,8 @@ When you want to host a "Service" or run a server, such as a Kubernetes cluster,
 
 | Method | Description | Parameters | Returns |
 |--------|-------------|------------|---------|
-| `CreateVM(ctx, groupName, request)` | Create a new VM in a host group. The underlying `POST /hostgroup/{name}/nodes` endpoint accepts optional `?wait=agent` or `?wait=userdata` query params with a `?timeout=` (Go duration) to block until readiness; set `CreateOpts.Wait` / `CreateOpts.Timeout` on the request to use them. | `ctx` (context.Context), `groupName` (string), `request` (SlicerCreateNodeRequest) | (*SlicerCreateNodeResponse, error) |
+| `CreateVM(ctx, groupName, request)` | Create a new VM in a host group and return immediately after the API create response. | `ctx` (context.Context), `groupName` (string), `request` (SlicerCreateNodeRequest) | (*SlicerCreateNodeResponse, error) |
+| `CreateVMWithOptions(ctx, groupName, request, options)` | Create a new VM with typed query options. Set `SlicerCreateNodeOptions.Wait` to `SlicerCreateNodeWaitAgent` or `SlicerCreateNodeWaitUserdata` with an optional `Timeout` to block server-side until readiness. | `ctx` (context.Context), `groupName` (string), `request` (SlicerCreateNodeRequest), `options` (SlicerCreateNodeOptions) | (*SlicerCreateNodeResponse, error) |
 | `RelaunchVM(ctx, hostname)` | Relaunch a known stopped persistent VM (re-uses its disk image). | `ctx` (context.Context), `hostname` (string) | (*SlicerCreateNodeResponse, error) |
 | `DeleteVM(ctx, groupName, hostname)` | Delete a VM from a host group | `ctx` (context.Context), `groupName` (string), `hostname` (string) | (*SlicerDeleteResponse, error) |
 | `ListVMs(ctx, opts...)` | List all VMs across all host groups. Pass an optional `ListOptions{Tag: "…"}` or `ListOptions{TagPrefix: "…"}` to filter server-side. | `ctx` (context.Context), `opts` (...ListOptions) | ([]SlicerNode, error) |
@@ -152,9 +153,11 @@ shelling out through `Exec` because they don't depend on guest-side
 
 ### Samples/Examples
 
-* [Create a VM with Userdata](examples/create/main.go)
-* [Create a VM with k3s installed via Userdata](examples/k3s-userdata/main.go)s
-* [Create a VM with claude code and run a headless inference](examples/claude/main.go)
+Each example is its own module requiring `github.com/slicervm/sdk v0.0.42` with `replace github.com/slicervm/sdk => ../../`, so run examples from their own directory.
+
+* [Create a VM and block until agent readiness](examples/create/main.go)
+* [Create a VM with k3s installed via Userdata](examples/k3s-userdata/main.go)
+* [Create a VM with Claude Code and run a headless inference](examples/claude/main.go)
 * [Upload a file to process in VM, download the results](examples/transform/main.go)
 * [Measure time to first interactive exec](examples/time_till_interactive/main.go)
 
@@ -221,9 +224,10 @@ Create a VM (node) in a host group with the default RAM/CPU settings as defined 
 package main
 
 import (
+    "context"
     "fmt"
     "os"
-    "context"
+    "time"
     
     sdk "github.com/slicervm/sdk"
 )
@@ -251,7 +255,10 @@ sudo reboot
     }
 
     ctx := context.Background()
-    node, err := client.CreateVM(ctx, hostGroup, createReq)
+    node, err := client.CreateVMWithOptions(ctx, hostGroup, createReq, sdk.SlicerCreateNodeOptions{
+        Wait:    sdk.SlicerCreateNodeWaitUserdata,
+        Timeout: 5 * time.Minute,
+    })
     if err != nil {
         panic(fmt.Errorf("failed to create node: %w", err))
     }

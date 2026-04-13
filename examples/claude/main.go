@@ -25,6 +25,7 @@ func main() {
 	baseURL := envOrDefault("SLICER_URL", "http://192.168.1.34:8080")
 	token := os.Getenv("SLICER_TOKEN")
 	hostGroup := envOrDefault("SLICER_HOST_GROUP", "vm")
+	tag := envOrDefault("CLAUDE_TAG", fmt.Sprintf("example=claude-%d", time.Now().Unix()))
 
 	if token == "" {
 		fmt.Println("SLICER_TOKEN is required")
@@ -32,42 +33,33 @@ func main() {
 	}
 
 	client := slicer.NewSlicerClient(baseURL, token, "slicer-claude-example/1.0", nil)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	node, err := client.CreateVM(ctx, hostGroup, slicer.SlicerCreateNodeRequest{Userdata: setupUserdata})
+	node, err := client.CreateVMWithOptions(ctx, hostGroup, slicer.SlicerCreateNodeRequest{
+		Userdata: setupUserdata,
+		Tags:     []string{tag},
+	}, slicer.SlicerCreateNodeOptions{
+		Wait:    slicer.SlicerCreateNodeWaitUserdata,
+		Timeout: 5 * time.Minute,
+	})
 	if err != nil {
 		fmt.Printf("create VM failed: %v\n", err)
 		os.Exit(1)
 	}
 
-	fmt.Printf("created VM: hostname=%s ip=%s\n", node.Hostname, node.IP)
+	fmt.Printf("created ready VM: hostname=%s ip=%s tag=%s\n", node.Hostname, node.IP, tag)
 
 	execCtx, execCancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer execCancel()
-
-	if err := waitForVMReady(execCtx, client, node.Hostname); err != nil {
-		fmt.Printf("VM not ready yet: %v\n", err)
-		os.Exit(1)
-	}
 
 	if err := copyClaudeCredentials(execCtx, client, node.Hostname); err != nil {
 		fmt.Printf("copy claude credentials failed: %v\n", err)
 		os.Exit(1)
 	}
 
-	if err := waitForClaudeBinary(execCtx, client, node.Hostname); err != nil {
-		fmt.Printf("claude not ready yet: %v\n", err)
-		os.Exit(1)
-	}
-
 	if err := ensureClaudeExecutable(execCtx, client, node.Hostname); err != nil {
 		fmt.Printf("prepare claude executable failed: %v\n", err)
-		os.Exit(1)
-	}
-
-	if err := waitForUserdataDone(execCtx, client, node.Hostname); err != nil {
-		fmt.Printf("userdata completion wait failed: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -81,29 +73,6 @@ func main() {
 	}
 
 	fmt.Printf("claude output:\n%s\n", strings.TrimSpace(out))
-}
-
-func waitForVMReady(ctx context.Context, client *slicer.SlicerClient, nodeName string) error {
-	retryDelay := 250 * time.Millisecond
-	for attempt := 1; ; attempt++ {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-
-		if _, err := client.GetAgentHealth(ctx, nodeName, false); err == nil {
-			return nil
-		}
-
-		if attempt%5 == 0 {
-			fmt.Printf("attempt %d: VM not ready yet\n", attempt)
-		}
-
-		select {
-		case <-time.After(retryDelay):
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
 }
 
 func runClaude(ctx context.Context, client *slicer.SlicerClient, nodeName string) (string, error) {
@@ -138,50 +107,6 @@ func ensureClaudeExecutable(ctx context.Context, client *slicer.SlicerClient, no
 	}
 
 	return nil
-}
-
-func waitForClaudeBinary(ctx context.Context, client *slicer.SlicerClient, nodeName string) error {
-	retryDelay := 500 * time.Millisecond
-	for attempt := 1; ; attempt++ {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-
-		check := client.CommandContext(ctx, nodeName, "test", "-x", "/usr/local/bin/claude")
-		if _, err := check.Output(); err == nil {
-			return nil
-		} else {
-			fmt.Printf("attempt %d: claude binary not ready yet (%v)\n", attempt, err)
-		}
-
-		select {
-		case <-time.After(retryDelay):
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-}
-
-func waitForUserdataDone(ctx context.Context, client *slicer.SlicerClient, nodeName string) error {
-	retryDelay := 10 * time.Millisecond
-	for attempt := 1; ; attempt++ {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-
-		check := client.CommandContext(ctx, nodeName, "test", "-f", "/etc/slicer/userdata-ran")
-		if _, err := check.Output(); err == nil {
-			return nil
-		} else {
-			fmt.Printf("attempt %d: userdata not done yet (%v)\n", attempt, err)
-		}
-
-		select {
-		case <-time.After(retryDelay):
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
 }
 
 func copyClaudeCredentials(ctx context.Context, client *slicer.SlicerClient, nodeName string) error {

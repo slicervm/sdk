@@ -13,5 +13,7 @@ Run:
 export SLICER_URL=https://box.slicervm.com
 export SLICER_TOKEN_FILE=~/.slicer/gh-access-token
 
-go run ./examples/box
+go run .
 ```
+
+Run from this directory. The example module requires `github.com/slicervm/sdk v0.0.42` and uses `replace github.com/slicervm/sdk => ../../` so local SDK changes are used.
