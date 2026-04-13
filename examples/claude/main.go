@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -33,10 +34,15 @@ func main() {
 	}
 
 	client := slicer.NewSlicerClient(baseURL, token, "slicer-claude-example/1.0", nil)
+	log.Printf("configured base_url=%s host_group=%s tag=%s", baseURL, hostGroup, tag)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
+	createStart := time.Now()
+	log.Printf("creating VM wait=userdata timeout=5m host_group=%s tag=%s cpus=2 ram_gb=4", hostGroup, tag)
 	node, err := client.CreateVMWithOptions(ctx, hostGroup, slicer.SlicerCreateNodeRequest{
+		CPUs:     2,
+		RamBytes: slicer.GiB(4),
 		Userdata: setupUserdata,
 		Tags:     []string{tag},
 	}, slicer.SlicerCreateNodeOptions{
@@ -48,21 +54,25 @@ func main() {
 		os.Exit(1)
 	}
 
+	log.Printf("created ready VM hostname=%s ip=%s elapsed=%s", node.Hostname, node.IP, time.Since(createStart).Round(time.Millisecond))
 	fmt.Printf("created ready VM: hostname=%s ip=%s tag=%s\n", node.Hostname, node.IP, tag)
 
 	execCtx, execCancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer execCancel()
 
+	log.Printf("copying Claude credentials hostname=%s", node.Hostname)
 	if err := copyClaudeCredentials(execCtx, client, node.Hostname); err != nil {
 		fmt.Printf("copy claude credentials failed: %v\n", err)
 		os.Exit(1)
 	}
 
+	log.Printf("ensuring Claude executable hostname=%s", node.Hostname)
 	if err := ensureClaudeExecutable(execCtx, client, node.Hostname); err != nil {
 		fmt.Printf("prepare claude executable failed: %v\n", err)
 		os.Exit(1)
 	}
 
+	log.Printf("running Claude command hostname=%s", node.Hostname)
 	out, err := runClaude(execCtx, client, node.Hostname)
 	if err != nil {
 		fmt.Printf("claude command failed: %v\n", err)

@@ -5,7 +5,7 @@ This example provisions a VM, installs Claude CLI via `arkade`, copies authentic
 What it does:
 
 - Reads `SLICER_URL` and `SLICER_TOKEN` from the environment
-- Creates a VM and blocks until user-data is complete
+- Creates a 2 vCPU / 4 GiB VM and blocks until user-data is complete
 - Tags the VM with `example=claude-<unix timestamp>` unless `CLAUDE_TAG` is set
 - Extracts credentials from macOS keychain item `Claude Code-credentials`:
   - `security find-generic-password -s "Claude Code-credentials" -w`

@@ -6,6 +6,7 @@ What it does:
 
 - Reads `SLICER_URL`, `SLICER_TOKEN`, optional `SLICER_HOST_GROUP`, and optional `SLICER_CREATE_TAG` from the environment
 - Calls `CreateVMWithOptions` and blocks until the guest agent is ready
+- Requests 1 vCPU / 1 GiB RAM for a quick create/readiness check
 - Tags the VM with `example=create-<unix timestamp>` unless `SLICER_CREATE_TAG` is set
 - Prints the created VM hostname, IP, tag, timestamp, and architecture
 

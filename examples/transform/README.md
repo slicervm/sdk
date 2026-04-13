@@ -4,7 +4,7 @@ This example demonstrates copy-in, process-on-VM, copy-out.
 
 What it does:
 
-- Creates a VM and blocks until the guest agent is ready
+- Creates a 2 vCPU / 2 GiB VM and blocks until the guest agent is ready
 - Tags the VM with `example=transform-<unix timestamp>` unless `FILE_TRANSFER_TAG` is set
 - Writes an input text file on the local machine
 - Copies it to `/home/ubuntu/input.txt` inside the VM

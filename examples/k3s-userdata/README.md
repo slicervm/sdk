@@ -4,9 +4,10 @@ This example demonstrates creating a VM, installing k3s via user-data, waiting f
 
 What it does:
 
-- Creates a VM in the `vm` host group with `k3sup` install/userdata and blocks until user-data is complete
+- Creates a 2 vCPU / 4 GiB VM in the `vm` host group with `k3sup` install/userdata and blocks until userdata is complete
 - Tags the VM with `example=k3s-<unix timestamp>` unless `K3S_TAG` is set
-- Polls `kubectl get nodes` with UID 1000
+- Verifies `kubectl get nodes` with UID 1000 after server-side userdata readiness returns
+- Logs progress and includes VM log excerpts if readiness is slow or fails
 - Copies kubeconfig back locally and rewrites `127.0.0.1`/`localhost` to the VM IP
 
 Run:

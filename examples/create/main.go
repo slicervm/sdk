@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"time"
@@ -27,14 +28,19 @@ func main() {
 	}
 
 	client := slicer.NewSlicerClient(baseURL, token, "slicer-sdk-go-example/1.0", nil)
+	log.Printf("configured base_url=%s host_group=%s tag=%s", baseURL, hostGroup, tag)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
 	req := slicer.SlicerCreateNodeRequest{
-		Tags: []string{tag},
+		CPUs:     1,
+		RamBytes: slicer.GiB(1),
+		Tags:     []string{tag},
 	}
 
+	createStart := time.Now()
+	log.Printf("creating VM wait=agent timeout=2m host_group=%s tag=%s cpus=1 ram_gb=1", hostGroup, tag)
 	resp, err := client.CreateVMWithOptions(ctx, hostGroup, req, slicer.SlicerCreateNodeOptions{
 		Wait:    slicer.SlicerCreateNodeWaitAgent,
 		Timeout: 2 * time.Minute,
@@ -44,6 +50,7 @@ func main() {
 		os.Exit(1)
 	}
 
+	log.Printf("created ready VM hostname=%s ip=%s elapsed=%s", resp.Hostname, resp.IP, time.Since(createStart).Round(time.Millisecond))
 	fmt.Printf("Created ready VM: hostname=%s ip=%s tag=%s created_at=%s arch=%s\n", resp.Hostname, resp.IP, tag, resp.CreatedAt.Format(time.RFC3339), resp.Arch)
 }
 

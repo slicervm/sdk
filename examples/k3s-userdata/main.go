@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -16,19 +17,31 @@ import (
 const setupUserdata = `#!/bin/bash
 set -euo pipefail
 
+exec > >(tee -a /var/log/slicer-k3s-userdata.log) 2>&1
+
+echo "phase=userdata_start ts=$(date -Is)"
+echo "phase=install_tools_start ts=$(date -Is)"
 arkade get k3sup kubectl --path /usr/local/bin
 chmod +x /usr/local/bin/*
+echo "phase=install_tools_done ts=$(date -Is)"
 
 if [ -x /usr/local/bin/k3sup ]; then
   export PATH="/usr/local/bin:${PATH}"
 fi
 
+echo "phase=k3sup_install_start ts=$(date -Is)"
 k3sup install --local
+echo "phase=k3sup_install_done ts=$(date -Is)"
+
+echo "phase=kubeconfig_start ts=$(date -Is)"
 mkdir -p /home/ubuntu/.kube
 cp kubeconfig /home/ubuntu/.kube/config
 chown -R ubuntu:ubuntu /home/ubuntu/
+echo "phase=kubeconfig_done ts=$(date -Is)"
 
+echo "phase=k3sup_ready_start ts=$(date -Is)"
 k3sup ready --kubeconfig ./kubeconfig --pause 500ms --attempts 120
+echo "phase=userdata_done ts=$(date -Is)"
 `
 
 func main() {
@@ -45,20 +58,31 @@ func main() {
 
 	client := slicer.NewSlicerClient(baseURL, token, "slicer-k3s-userdata/1.0", nil)
 
+	log.Printf("configured base_url=%s host_group=%s tag=%s", baseURL, hostGroup, tag)
+
 	infoCtx, infoCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer infoCancel()
 
+	log.Printf("Resolving hostgroup")
 	hostGroup, err := resolveHostGroup(infoCtx, client, hostGroup)
 	if err != nil {
 		fmt.Printf("failed to resolve hostgroup from /info: %v\n", err)
 		fmt.Printf("using configured host group: %s\n", hostGroup)
+	} else {
+		log.Printf("resolved host_group=%s", hostGroup)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Minute)
+	log.Printf("host_group=%s", hostGroup)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 13*time.Minute)
 	defer cancel()
+
+	log.Printf("creating VM wait=userdata timeout=12m host_group=%s tag=%s cpus=2 ram_gb=4", hostGroup, tag)
 
 	createStart := time.Now()
 	node, err := client.CreateVMWithOptions(ctx, hostGroup, slicer.SlicerCreateNodeRequest{
+		CPUs:     2,
+		RamBytes: slicer.GiB(4),
 		Userdata: setupUserdata,
 		Tags:     []string{tag},
 	}, slicer.SlicerCreateNodeOptions{
@@ -69,7 +93,8 @@ func main() {
 		fmt.Printf("create VM failed: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Printf("phase=create_ready_vm_ms elapsed=%d\n", time.Since(createStart).Milliseconds())
+	log.Printf("created ready VM hostname=%s ip=%s elapsed=%s", node.Hostname, node.IP, time.Since(createStart).Round(time.Millisecond))
+	fmt.Printf("phase=create_userdata_ready_vm_ms elapsed=%d\n", time.Since(createStart).Milliseconds())
 
 	nodeIP, err := parseNodeIP(node.IP)
 	if err != nil {
@@ -82,11 +107,14 @@ func main() {
 	defer execCancel()
 
 	kubeStart := time.Now()
-	out, err := waitForKubectlNodes(execCtx, client, node.Hostname, 1000)
+	log.Printf("waiting for userdata/k3s readiness via kubectl timeout=12m hostname=%s", node.Hostname)
+	out, err := waitForKubectlNodes(execCtx, client, hostGroup, node.Hostname, tag, 1000)
 	if err != nil {
 		fmt.Printf("kubectl check failed: %v\n", err)
+		printVMLogs(execCtx, client, node.Hostname, 80)
 		os.Exit(1)
 	}
+	log.Printf("kubectl is ready elapsed=%s", time.Since(kubeStart).Round(time.Millisecond))
 	fmt.Printf("phase=kubectl_get_nodes_ms elapsed=%d\n", time.Since(kubeStart).Milliseconds())
 
 	fmt.Printf("kubectl get nodes output:\n%s\n", strings.TrimSpace(out))
@@ -99,11 +127,14 @@ func main() {
 		fmt.Printf("warning: no IP available for kubeconfig rewrite\n")
 	} else {
 		kubeCopyStart := time.Now()
+		log.Printf("copying kubeconfig hostname=%s node_ip=%s", node.Hostname, nodeIP)
 		localConfig, err := copyAndRewriteKubeconfig(execCtx, client, node.Hostname, nodeIP)
 		if err != nil {
 			fmt.Printf("kubeconfig copy failed: %v\n", err)
+			printVMLogs(execCtx, client, node.Hostname, 80)
 			os.Exit(1)
 		}
+		log.Printf("copied kubeconfig path=%s elapsed=%s", localConfig, time.Since(kubeCopyStart).Round(time.Millisecond))
 		fmt.Printf("phase=copy_kubeconfig_ms elapsed=%d\n", time.Since(kubeCopyStart).Milliseconds())
 		fmt.Printf("kubeconfig saved and updated for direct use: %s\n", localConfig)
 		fmt.Printf("try it now:\n")
@@ -113,8 +144,9 @@ func main() {
 	fmt.Printf("phase=total_ms elapsed=%d\n", time.Since(totalStart).Milliseconds())
 }
 
-func waitForKubectlNodes(ctx context.Context, client *slicer.SlicerClient, nodeName string, uid uint32) (string, error) {
+func waitForKubectlNodes(ctx context.Context, client *slicer.SlicerClient, hostGroup, nodeName, tag string, uid uint32) (string, error) {
 	retryDelay := 1 * time.Second
+	notFoundAttempts := 0
 	for attempt := 1; ; attempt++ {
 		if ctx.Err() != nil {
 			return "", ctx.Err()
@@ -129,7 +161,28 @@ func waitForKubectlNodes(ctx context.Context, client *slicer.SlicerClient, nodeN
 			return out, err
 		}
 
-		fmt.Printf("attempt %d: kubectl not ready yet (%v)\n", attempt, err)
+		if isNotFound(err) {
+			notFoundAttempts++
+			if notFoundAttempts >= 3 {
+				nodes, listErr := client.GetHostGroupNodes(ctx, hostGroup, slicer.ListOptions{Tag: tag})
+				if listErr != nil {
+					return out, fmt.Errorf("guest endpoint returned 404 for %s and node lookup failed: %w", nodeName, listErr)
+				}
+				if len(nodes) == 0 {
+					return out, fmt.Errorf("guest endpoint returned 404 for %s and no nodes with tag %q remain in host group %s", nodeName, tag, hostGroup)
+				}
+				return out, fmt.Errorf("guest endpoint returned 404 for %s; nodes with tag %q still present: %s", nodeName, tag, formatNodeNames(nodes))
+			}
+		} else {
+			notFoundAttempts = 0
+		}
+
+		if attempt == 1 || attempt%10 == 0 {
+			log.Printf("kubectl not ready attempt=%d err=%v", attempt, err)
+		}
+		if attempt%30 == 0 {
+			printVMLogs(ctx, client, nodeName, 20)
+		}
 
 		select {
 		case <-time.After(retryDelay):
@@ -137,6 +190,34 @@ func waitForKubectlNodes(ctx context.Context, client *slicer.SlicerClient, nodeN
 			return "", ctx.Err()
 		}
 	}
+}
+
+func isNotFound(err error) bool {
+	return strings.Contains(err.Error(), "404 Not Found")
+}
+
+func formatNodeNames(nodes []slicer.SlicerNode) string {
+	names := make([]string, 0, len(nodes))
+	for _, node := range nodes {
+		names = append(names, node.Hostname)
+	}
+	return strings.Join(names, ",")
+}
+
+func printVMLogs(ctx context.Context, client *slicer.SlicerClient, nodeName string, lines int) {
+	logs, err := client.GetVMLogs(ctx, nodeName, lines)
+	if err != nil {
+		log.Printf("unable to fetch VM logs hostname=%s err=%v", nodeName, err)
+		return
+	}
+
+	content := strings.TrimSpace(logs.Content)
+	if content == "" {
+		log.Printf("VM logs are empty hostname=%s", nodeName)
+		return
+	}
+
+	log.Printf("last %d VM log lines for %s:\n%s", lines, nodeName, content)
 }
 
 func runKubectlNodes(ctx context.Context, client *slicer.SlicerClient, nodeName string, uid uint32) (string, error) {

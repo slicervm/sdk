@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"time"
@@ -30,12 +31,17 @@ func main() {
 	}
 
 	client := slicer.NewSlicerClient(baseURL, token, "slicer-file-transfer/1.0", nil)
+	log.Printf("configured base_url=%s host_group=%s tag=%s output=%s", baseURL, hostGroup, tag, outputName)
 
 	createCtx, createCancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer createCancel()
 
+	createStart := time.Now()
+	log.Printf("creating VM wait=agent timeout=2m host_group=%s tag=%s cpus=2 ram_gb=2", hostGroup, tag)
 	node, err := client.CreateVMWithOptions(createCtx, hostGroup, slicer.SlicerCreateNodeRequest{
-		Tags: []string{tag},
+		CPUs:     2,
+		RamBytes: slicer.GiB(2),
+		Tags:     []string{tag},
 	}, slicer.SlicerCreateNodeOptions{
 		Wait:    slicer.SlicerCreateNodeWaitAgent,
 		Timeout: 2 * time.Minute,
@@ -45,17 +51,20 @@ func main() {
 		os.Exit(1)
 	}
 
+	log.Printf("created ready VM hostname=%s ip=%s elapsed=%s", node.Hostname, node.IP, time.Since(createStart).Round(time.Millisecond))
 	fmt.Printf("created ready VM: hostname=%s ip=%s tag=%s\n", node.Hostname, node.IP, tag)
 
 	execCtx, execCancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer execCancel()
 
 	localInput := "input-" + node.Hostname + ".txt"
+	log.Printf("writing local input path=%s bytes=%d", localInput, len(inputContent))
 	if err := os.WriteFile(localInput, []byte(inputContent), 0o600); err != nil {
 		fmt.Printf("write local input failed: %v\n", err)
 		os.Exit(1)
 	}
 
+	log.Printf("copying input to VM hostname=%s", node.Hostname)
 	if err := client.CpToVM(execCtx, node.Hostname, localInput, "/home/ubuntu/input.txt", 1000, 1000, "600", "binary"); err != nil {
 		fmt.Printf("copy input to VM failed: %v\n", err)
 		os.Exit(1)
@@ -63,6 +72,7 @@ func main() {
 
 	fmt.Printf("copied local file to VM: %s -> /home/ubuntu/input.txt\n", localInput)
 
+	log.Printf("running transform command hostname=%s", node.Hostname)
 	out, err := runFileTransform(execCtx, client, node.Hostname)
 	if err != nil {
 		fmt.Printf("transform command failed: %v\n", err)
@@ -73,6 +83,7 @@ func main() {
 	}
 
 	localOutput := "output-" + node.Hostname + ".txt"
+	log.Printf("copying output from VM hostname=%s path=%s", node.Hostname, localOutput)
 	if err := client.CpFromVM(execCtx, node.Hostname, "/home/ubuntu/output.txt", localOutput, "600", "binary"); err != nil {
 		fmt.Printf("copy output from VM failed: %v\n", err)
 		os.Exit(1)
