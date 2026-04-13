@@ -173,6 +173,8 @@ shelling out through `Exec` because they don't depend on guest-side
 | `Remove(ctx, vmName, path, recursive)` | Remove a file or directory. | `ctx`, `vmName` (string), `path` (string), `recursive` (bool) | error |
 | `ReadFile(ctx, vmName, vmPath)` | Download a single file's bytes plus its mode. | `ctx`, `vmName` (string), `vmPath` (string) | ([]byte, string, error) |
 | `WriteFile(ctx, vmName, vmPath, data, uid, gid, permissions)` | Upload a single file with a specific mode. | `ctx`, `vmName` (string), `vmPath` (string), `data` ([]byte), `uid`/`gid` (uint32), `permissions` (string) | error |
+| `WatchFS(ctx, vmName, request)` | Stream filesystem events (SSE) from `GET /vm/{hostname}/fs/watch`. Delivers decoded events on one channel and any terminal error on another. | `ctx`, `vmName` (string), `request` (SlicerFSWatchRequest) | (<-chan SlicerFSWatchEvent, <-chan error) |
+| `WatchFSIter(ctx, vmName, request)` | Range-over-func adapter for `WatchFS` using Go 1.23 `iter.Seq2`. | `ctx`, `vmName` (string), `request` (SlicerFSWatchRequest) | `iter.Seq2[SlicerFSWatchEvent, error]` |
 
 #### Secret Management
 
