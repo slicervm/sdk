@@ -308,8 +308,15 @@ func (c *SlicerClient) CreateVM(ctx context.Context, groupName string, request S
 }
 
 // CreateVMWithOptions creates a new VM in the specified host group with optional wait/query behavior.
+//
+// groupName may be an empty string, in which case the server resolves to the
+// single configured host group. If zero or more than one host group is
+// configured the server responds 400 Bad Request.
 func (c *SlicerClient) CreateVMWithOptions(ctx context.Context, groupName string, request SlicerCreateNodeRequest, options SlicerCreateNodeOptions) (*SlicerCreateNodeResponse, error) {
-	endpoint := fmt.Sprintf("hostgroup/%s/nodes", groupName)
+	endpoint := "hostgroup/nodes"
+	if strings.TrimSpace(groupName) != "" {
+		endpoint = fmt.Sprintf("hostgroup/%s/nodes", groupName)
+	}
 	reqURL, err := url.Parse(c.baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid base URL: %w", err)
