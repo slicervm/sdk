@@ -109,6 +109,13 @@ type SlicerExecWriteResult struct {
 	Stderr    string    `json:"stderr,omitempty"`
 	ExitCode  int       `json:"exit_code"`
 	Error     string    `json:"error,omitempty"`
+
+	// Background-exec extensions. The foreground /exec streaming API never sets
+	// these; they are emitted by the background-exec log stream.
+	ID            uint64 `json:"id,omitempty"`
+	DroppedBytes  int64  `json:"dropped_bytes,omitempty"`
+	DroppedFrames int    `json:"dropped_frames,omitempty"`
+	Message       string `json:"message,omitempty"`
 }
 
 type ExecResult struct {
