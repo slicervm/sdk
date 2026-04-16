@@ -210,6 +210,29 @@ func (c *SlicerClient) makeJSONRequestWithContext(ctx context.Context, method, e
 	return c.httpClient.Do(req)
 }
 
+// resolveDefaultHostGroup returns the name of the only configured host group.
+// It is used when the caller passes an empty groupName to VM-launching
+// methods. Zero groups or multiple groups produce an explicit error with the
+// available group names listed for convenience.
+func (c *SlicerClient) resolveDefaultHostGroup(ctx context.Context) (string, error) {
+	groups, err := c.GetHostGroups(ctx)
+	if err != nil {
+		return "", fmt.Errorf("slicer: resolve default host group: %w", err)
+	}
+	switch len(groups) {
+	case 1:
+		return groups[0].Name, nil
+	case 0:
+		return "", fmt.Errorf("slicer: no host groups configured")
+	default:
+		names := make([]string, 0, len(groups))
+		for _, g := range groups {
+			names = append(names, g.Name)
+		}
+		return "", fmt.Errorf("slicer: host group is required when more than one is configured (have: %s)", strings.Join(names, ", "))
+	}
+}
+
 // GetHostGroups fetches all host groups from the API
 func (c *SlicerClient) GetHostGroups(ctx context.Context) ([]SlicerHostGroup, error) {
 	res, err := c.makeJSONRequestWithContext(ctx, http.MethodGet, "/hostgroup", nil)
@@ -309,14 +332,21 @@ func (c *SlicerClient) CreateVM(ctx context.Context, groupName string, request S
 
 // CreateVMWithOptions creates a new VM in the specified host group with optional wait/query behavior.
 //
-// groupName may be an empty string, in which case the server resolves to the
-// single configured host group. If zero or more than one host group is
-// configured the server responds 400 Bad Request.
+// groupName may be an empty string, in which case the SDK resolves it
+// client-side by listing configured host groups and picking the only one.
+// If zero or more than one host group is configured the call returns an
+// error without touching the server further. Callers that already know the
+// group name should always pass it in to avoid the extra list round-trip.
 func (c *SlicerClient) CreateVMWithOptions(ctx context.Context, groupName string, request SlicerCreateNodeRequest, options SlicerCreateNodeOptions) (*SlicerCreateNodeResponse, error) {
-	endpoint := "hostgroup/nodes"
-	if strings.TrimSpace(groupName) != "" {
-		endpoint = fmt.Sprintf("hostgroup/%s/nodes", groupName)
+	if strings.TrimSpace(groupName) == "" {
+		resolved, err := c.resolveDefaultHostGroup(ctx)
+		if err != nil {
+			return nil, err
+		}
+		groupName = resolved
 	}
+
+	endpoint := fmt.Sprintf("hostgroup/%s/nodes", groupName)
 	reqURL, err := url.Parse(c.baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid base URL: %w", err)
