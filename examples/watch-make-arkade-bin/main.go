@@ -10,7 +10,7 @@
 // Usage:
 //
 //	SLICER_URL=https://slicer.example.com SLICER_TOKEN=... \
-//	  go run . -vm demo-1 -path /home/ubuntu/src/arkade/bin
+//	  go run . -path /home/ubuntu/src/arkade/bin
 //
 // In another terminal (or from your own orchestration), run `make dist`:
 //
@@ -32,6 +32,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	slicer "github.com/slicervm/sdk"
 )
 
@@ -39,7 +40,6 @@ func main() {
 	var (
 		apiURL  = flag.String("url", os.Getenv("SLICER_URL"), "Slicer API URL (overrides SLICER_URL)")
 		token   = flag.String("token", os.Getenv("SLICER_TOKEN"), "Bearer token (overrides SLICER_TOKEN)")
-		vm      = flag.String("vm", "", "VM hostname, e.g. demo-1")
 		watch   = flag.String("path", "/home/ubuntu/src/arkade/bin", "Directory inside the VM to watch")
 		pattern = flag.String("pattern", "arkade*", "Glob patterns, comma-separated")
 		uid     = flag.Uint("uid", 1000, "UID on the guest used to resolve ~ in paths")
@@ -48,7 +48,8 @@ func main() {
 	)
 	flag.Parse()
 
-	if *apiURL == "" || *vm == "" {
+	if *apiURL == "" {
+		log.Printf("url not given")
 		flag.Usage()
 		os.Exit(2)
 	}
@@ -65,6 +66,22 @@ func main() {
 			log.Fatalf("client: %v", err)
 		}
 	}
+
+	hg, err := client.GetHostGroups(context.TODO())
+	if err != nil {
+		log.Fatalf("get host groups: %v", err)
+	}
+
+	uuid := uuid.New()
+
+	vm, err := client.CreateVM(context.Background(), hg[0].Name, slicer.SlicerCreateNodeRequest{
+		Tags: []string{"uuid=" + uuid.String(), "demo=make-arkade-bin"},
+	})
+	if err != nil {
+		log.Fatalf("create vm: %v", err)
+	}
+
+	fmt.Fprintf(os.Stderr, "created vm %s\n", vm.Hostname)
 
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
@@ -85,10 +102,10 @@ func main() {
 		UID:       uint32(*uid),
 	}
 
-	fmt.Fprintf(os.Stderr, "watching %s:%s (patterns=%v, timeout=%s)\n", *vm, *watch, patterns, *timeout)
+	fmt.Fprintf(os.Stderr, "watching %s:%s (patterns=%v, timeout=%s)\n", vm.Hostname, *watch, patterns, *timeout)
 
 	binaries := map[string]int64{}
-	for evt, err := range client.WatchFSIter(ctx, *vm, req) {
+	for evt, err := range client.WatchFSIter(ctx, vm.Hostname, req) {
 		if err != nil {
 			if ctx.Err() != nil {
 				break
