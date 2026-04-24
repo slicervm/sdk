@@ -1,11 +1,12 @@
 # shell-test
 
-Minimal browser-based terminal for Slicer VMs, using the SDK's `shell.ProxyHandler` and xterm.js. No auth, no users — for integration testing only.
+Minimal React + xterm.js browser terminal for Slicer VMs, using the SDK's `shell.ProxyHandler`. No auth, no users — for integration testing and as a reference for building your own shell UI.
 
 ## Prerequisites
 
-- A running Slicer daemon with at least one host group configured.
+- A running Slicer daemon
 - Go 1.22+
+- Node.js 18+
 
 ## Quick start
 
@@ -25,25 +26,43 @@ sudo -E slicer up ./slicer.yaml > ./slicer.log 2>&1 &
 echo $! | sudo tee /tmp/shell-test/slicer.pid
 ```
 
-Wait a few seconds for the daemon to start, then verify:
+Wait a few seconds, then verify:
 
 ```bash
 tail -5 /tmp/shell-test/slicer.log
 # Should show "API listening on Unix socket: ./shell-test.sock"
 ```
 
-### 2. Start the shell-test UI
+### 2. Build and start the shell-test UI
 
 ```bash
-cd /path/to/sdk
-go run ./examples/shell-test/ --url /tmp/shell-test/shell-test.sock
+cd examples/shell-test/web
+npm install
+npm run build
+cd ..
+
+go run . --url /tmp/shell-test/shell-test.sock
 ```
 
 Open **http://\<host\>:3333** in a browser.
 
-If no VMs are running, click **Launch VM** in the UI. Otherwise, select a VM from the dropdown and click **Connect**.
+No VMs will be running initially — click **Launch VM** to create one, then select it and click **Connect**.
 
-### 3. Clean up
+### 3. Development mode
+
+For live-reload during frontend development, run the Go server and Vite dev server separately:
+
+```bash
+# Terminal 1: Go API + WebSocket proxy
+go run . --url /tmp/shell-test/shell-test.sock
+
+# Terminal 2: Vite dev server with proxy to Go backend
+cd web && npm run dev
+```
+
+Then open the Vite URL (usually http://localhost:5173). API and WebSocket requests are proxied to the Go server via `vite.config.ts`.
+
+### 4. Clean up
 
 ```bash
 sudo kill -INT $(cat /tmp/shell-test/slicer.pid)
@@ -60,14 +79,27 @@ sudo kill -9 $(cat /tmp/shell-test/slicer.pid) 2>/dev/null || true
 | `--listen` | `0.0.0.0:3333` | HTTP listen address |
 | `--shell` | `/bin/bash` | Shell binary inside the VM |
 
-## How it works
+## Architecture
 
-The Go server provides three API endpoints:
+The Go server provides:
 
-- `GET /api/vms` — lists running VMs via `client.ListVMs()`
+- `GET /api/vms` — lists VMs via `client.ListVMs()`
 - `GET /api/hostgroups` — lists host groups via `client.GetHostGroups()`
-- `POST /api/launch?group=NAME` — creates a new VM via `client.CreateVMWithOptions()`, waits for agent readiness
+- `POST /api/launch?group=NAME` — creates a VM via `client.CreateVMWithOptions()`, waits for agent readiness
+- `GET /ws/shell?vm=HOSTNAME` — WebSocket proxy via `shell.NewProxyHandler()` with `VMNameFunc`
 
-The shell WebSocket is proxied at `/ws/shell?vm=HOSTNAME` using `shell.NewProxyHandler()` with a `VMNameFunc` that reads the hostname from the query string.
+The React frontend (`web/src/`) polls the VM list every 5 seconds, provides a dropdown to select a VM, and renders an xterm.js terminal connected via the Slicer binary frame protocol.
 
-The frontend uses CDN-hosted xterm.js and the Slicer binary frame protocol (5-byte header: 1 byte type + 4 bytes big-endian length).
+### Shell wire protocol
+
+Each WebSocket message is a binary frame:
+
+| Offset | Size | Field |
+|--------|------|-------|
+| 0 | 1 byte | Frame type |
+| 1–4 | 4 bytes | Payload length (big-endian) |
+| 5+ | variable | Payload |
+
+Frame types: `0x01` Data, `0x02` WindowSize (8 bytes: cols + rows as uint32 BE), `0x03` Shutdown, `0x04` Heartbeat.
+
+See `web/src/shell.ts` for the browser implementation.

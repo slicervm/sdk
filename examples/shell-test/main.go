@@ -1,10 +1,11 @@
-// shell-test serves a minimal browser UI with an xterm.js terminal that
-// connects to a Slicer VM shell via the SDK's shell.ProxyHandler.
+// shell-test serves a minimal React + xterm.js UI that connects to a Slicer
+// VM shell via the SDK's shell.ProxyHandler.
 //
 // No auth, no users — purely for integration testing.
 //
 // Usage:
 //
+//	cd web && npm run build && cd ..
 //	go run . --url /tmp/shell-test/shell-test.sock
 //	# open http://<host>:3333
 package main
@@ -24,8 +25,8 @@ import (
 	"github.com/slicervm/sdk/shell"
 )
 
-//go:embed static/*
-var staticFiles embed.FS
+//go:embed web/dist/*
+var webFiles embed.FS
 
 func main() {
 	var (
@@ -57,7 +58,7 @@ func main() {
 		Logger: logger,
 	})
 
-	staticFS, err := fs.Sub(staticFiles, "static")
+	distFS, err := fs.Sub(webFiles, "web/dist")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -111,7 +112,7 @@ func main() {
 		json.NewEncoder(w).Encode(vm)
 	})
 
-	mux.Handle("/", http.FileServer(http.FS(staticFS)))
+	mux.Handle("/", http.FileServer(http.FS(distFS)))
 
 	fmt.Printf("Shell test UI: http://%s\n", *listen)
 	fmt.Printf("Slicer API: %s\n", *slicerURL)
