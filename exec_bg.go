@@ -119,10 +119,14 @@ func (c *SlicerClient) ExecBackground(ctx context.Context, vmName string, req Ex
 	for _, e := range req.Env {
 		q.Add("env", e)
 	}
-	if req.UID != 0 {
+	// NonRootUser is the "auto-detect" sentinel — leave it off the wire so
+	// the agent's resolveUIDGID picks a default non-root user (ubuntu). Any
+	// other value, including 0, is sent as an explicit choice. Conflating
+	// UID==0 with "unset" would mean there's no way to request root.
+	if req.UID != NonRootUser {
 		q.Set("uid", strconv.FormatUint(uint64(req.UID), 10))
 	}
-	if req.GID != 0 {
+	if req.GID != NonRootUser {
 		q.Set("gid", strconv.FormatUint(uint64(req.GID), 10))
 	}
 	if req.Shell != "" {
