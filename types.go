@@ -56,6 +56,25 @@ type SlicerCreateNodeOptions struct {
 	Timeout time.Duration `json:"-"`
 }
 
+// SlicerRestoreVMWaitFor controls server-side readiness waiting for restore.
+// Userdata is intentionally not exposed here: snapshot resume returns to a
+// guest that has already booted, so the userdata-ran sentinel is irrelevant.
+type SlicerRestoreVMWaitFor string
+
+const (
+	SlicerRestoreVMWaitNone  SlicerRestoreVMWaitFor = ""
+	SlicerRestoreVMWaitAgent SlicerRestoreVMWaitFor = "agent"
+)
+
+// SlicerRestoreVMOptions mirrors SlicerCreateNodeOptions for the /vm/{h}/restore
+// endpoint.
+type SlicerRestoreVMOptions struct {
+	// Wait controls server-side readiness waiting. Empty means no wait.
+	Wait SlicerRestoreVMWaitFor `json:"-"`
+	// Timeout is optional wait timeout when Wait is set.
+	Timeout time.Duration `json:"-"`
+}
+
 // MB converts megabytes to bytes
 func MiB(mb int64) int64 {
 	return mb * 1024 * 1024

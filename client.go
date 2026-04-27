@@ -1349,14 +1349,34 @@ func (c *SlicerClient) SuspendVM(ctx context.Context, hostname string) error {
 	return nil
 }
 
-// RestoreVM restores a VM from a Firecracker snapshot
+// RestoreVM restores a VM from a Firecracker snapshot with no readiness
+// wait. Returns once the daemon has scheduled the launch goroutine; the
+// agent may not yet be reachable. Pass options via RestoreVMWithOptions to
+// have the daemon block on agent readiness.
 func (c *SlicerClient) RestoreVM(ctx context.Context, hostname string) error {
+	return c.RestoreVMWithOptions(ctx, hostname, SlicerRestoreVMOptions{})
+}
+
+// RestoreVMWithOptions restores a VM and optionally waits server-side for
+// the guest agent's /v1/health endpoint to answer 200. The daemon polls the
+// vsock-backed health endpoint at ~1 ms intervals, so the call returns
+// shortly after firecracker resumes the snapshot. timeout=0 falls back to
+// the daemon default.
+func (c *SlicerClient) RestoreVMWithOptions(ctx context.Context, hostname string, opts SlicerRestoreVMOptions) error {
 	u, err := url.Parse(c.baseURL)
 	if err != nil {
 		return fmt.Errorf("failed to parse API URL: %w", err)
 	}
 
 	u.Path = fmt.Sprintf("/vm/%s/restore", hostname)
+	if opts.Wait != SlicerRestoreVMWaitNone {
+		q := u.Query()
+		q.Set("wait", string(opts.Wait))
+		if opts.Timeout > 0 {
+			q.Set("timeout", opts.Timeout.String())
+		}
+		u.RawQuery = q.Encode()
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), nil)
 	if err != nil {
