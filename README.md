@@ -13,6 +13,7 @@ SDK for [SlicerVM.com](https://slicervm.com)
   - [VM Operations](#vm-operations)
   - [Guest Operations](#guest-operations)
   - [Secret Management](#secret-management)
+  - [Slicer-Proxy Admin](#slicer-proxy-admin)
 - [Documentation](#documentation)
 - [Quick Start](#quick-start)
 
@@ -185,6 +186,83 @@ shelling out through `Exec` because they don't depend on guest-side
 | `PatchSecret(ctx, secretName, request)` | Update an existing secret with new data and/or metadata. Only provided fields are modified. | `ctx` (context.Context), `secretName` (string), `request` (UpdateSecretRequest) | error |
 | `DeleteSecret(ctx, secretName)` | Delete a secret | `ctx` (context.Context), `secretName` (string) | error |
 
+#### Slicer-Proxy Admin
+
+Available since `v0.0.49`. Manages the slicer egress proxy: clients
+(holders of an HTTPS_PROXY access token), upstream-credential
+secrets, and per-client allow rules. The proxy injects a bound
+secret onto the inner request when an allow rule matches, so real
+upstream credentials never need to enter a guest VM.
+
+| Method | Description | Parameters | Returns |
+|--------|-------------|------------|---------|
+| `CreateProxyClient(ctx, name, setToken)` | Mint a client and return its access token. The token is shown once and is the only way to authenticate against the data-plane CONNECT listener. Pass `setToken=""` for a server-minted `spt_…` token. | `ctx` (context.Context), `name` (string), `setToken` (string) | (*ProxyClientCreated, error) |
+| `ListProxyClients(ctx)` | List all proxy clients (no tokens). | `ctx` (context.Context) | ([]ProxyClient, error) |
+| `DeleteProxyClient(ctx, name)` | Revoke the token, drop every allow rule the client owned, remove the client. | `ctx` (context.Context), `name` (string) | error |
+| `CreateProxySecret(ctx, request)` | Register an upstream credential. Use `Type: SecretTypeBearer` (default) for raw tokens or `Type: SecretTypeBasic` with `Value` in `user:pass` form for HTTP Basic. | `ctx` (context.Context), `request` (CreateProxySecretRequest) | error |
+| `ListProxySecrets(ctx)` | List secrets (values never returned). | `ctx` (context.Context) | ([]ProxySecret, error) |
+| `DeleteProxySecret(ctx, name)` | Remove a secret. Allow rules referencing it stop matching until the secret is recreated. | `ctx` (context.Context), `name` (string) | error |
+| `AddProxyAllow(ctx, request)` | Grant a client access to a host, optionally injecting a named secret on every CONNECT to that host. Set `request.Host="*"` to match every CONNECT. | `ctx` (context.Context), `request` (AddProxyAllowRequest) | error |
+| `RemoveProxyAllow(ctx, client, host)` | Revoke one allow rule for a client. | `ctx` (context.Context), `client`, `host` (string) | error |
+| `ListProxyRules(ctx, client)` | Return the client's allow rules in declaration order. | `ctx` (context.Context), `client` (string) | ([]ProxyAllowRule, error) |
+
+End-to-end example — mint a client, register a credential, allow an
+upstream, exec a curl through the proxy from inside the guest, then
+revoke the grant:
+
+```go
+import (
+    "context"
+    "log"
+    "os"
+    "strings"
+
+    sdk "github.com/slicervm/sdk"
+)
+
+func main() {
+    c := sdk.NewSlicerClient("./slicer.sock", "", "proxy-demo/1.0", nil)
+    ctx := context.Background()
+
+    created, err := c.CreateProxyClient(ctx, "build-1", "")
+    if err != nil { log.Fatal(err) }
+    defer c.DeleteProxyClient(ctx, "build-1")
+
+    bearer, _ := os.ReadFile(os.ExpandEnv("$HOME/upstream-bearer.txt"))
+    if err := c.CreateProxySecret(ctx, sdk.CreateProxySecretRequest{
+        Name:  "llama",
+        Host:  "llm.example.internal",
+        Value: strings.TrimSpace(string(bearer)),
+    }); err != nil { log.Fatal(err) }
+    defer c.DeleteProxySecret(ctx, "llama")
+
+    if err := c.AddProxyAllow(ctx, sdk.AddProxyAllowRequest{
+        Client: "build-1",
+        Host:   "llm.example.internal",
+        Secret: "llama",
+    }); err != nil { log.Fatal(err) }
+
+    cmd := c.CommandContext(ctx, "demo-1", "curl", "-sS",
+        "-X", "POST", "https://llm.example.internal/v1/chat/completions",
+        "-H", "Content-Type: application/json",
+        "-d", `{"model":"local","messages":[{"role":"user","content":"Reply OK"}],"max_tokens":4}`,
+    )
+    cmd.Env = []string{
+        "HTTPS_PROXY=https://:" + created.Token + "@192.168.142.1:3128",
+    }
+    out, _ := cmd.CombinedOutput()
+    log.Printf("upstream said: %s", out)
+
+    // revoke the grant; subsequent CONNECTs land as DENY in the proxy log
+    _ = c.RemoveProxyAllow(ctx, "build-1", "llm.example.internal")
+}
+```
+
+The token never enters the guest filesystem in this example — only
+its `HTTPS_PROXY` env-var literal for that single exec. The upstream
+credential (`llama` bearer) never enters the guest at all; the proxy
+injects it on the inner request.
+
 ### Documentation
 
 - **Tutorial**: [Execute Commands in VM via SDK](https://docs.slicervm.com/tasks/execute-commands-with-sdk/)
@@ -192,7 +270,7 @@ shelling out through `Exec` because they don't depend on guest-side
 
 ### Samples/Examples
 
-Each example is its own module requiring `github.com/slicervm/sdk v0.0.42` with `replace github.com/slicervm/sdk => ../../`, so run examples from their own directory.
+Each example is its own module requiring `github.com/slicervm/sdk v0.0.49` with `replace github.com/slicervm/sdk => ../../`, so run examples from their own directory.
 
 * [Create a VM and block until agent readiness](examples/create/main.go)
 * [Create a VM with k3s installed via Userdata](examples/k3s-userdata/main.go)
