@@ -54,19 +54,28 @@ type CreateProxySecretRequest struct {
 // ProxyAllowRule grants a ProxyClient access to one host (exact, *.suffix
 // wildcard, or "*" for any). When Secret is set, the proxy strips the
 // client-supplied Authorization on the inner request and substitutes
-// "Bearer <secret-value>".
+// the rule-bound credential.
+//
+// Methods and Paths are optional filters. When set, the request must
+// match at least one entry in each non-empty list. Empty list = any.
+// Path supports exact match, "*" (any path), or "<prefix>/*" suffix
+// glob (anything strictly under the prefix).
 type ProxyAllowRule struct {
 	Host    string    `json:"host"`
 	Secret  string    `json:"secret,omitempty"`
+	Methods []string  `json:"methods,omitempty"`
+	Paths   []string  `json:"paths,omitempty"`
 	Expires time.Time `json:"expires,omitempty"`
 }
 
 // AddProxyAllowRequest is the input to AddProxyAllow.
 type AddProxyAllowRequest struct {
-	Client     string `json:"client"`
-	Host       string `json:"host"`
-	Secret     string `json:"secret,omitempty"`
-	TTLSeconds int    `json:"ttl_seconds,omitempty"`
+	Client     string   `json:"client"`
+	Host       string   `json:"host"`
+	Secret     string   `json:"secret,omitempty"`
+	Methods    []string `json:"methods,omitempty"`
+	Paths      []string `json:"paths,omitempty"`
+	TTLSeconds int      `json:"ttl_seconds,omitempty"`
 }
 
 // CreateProxyClient mints a new proxy access token. setToken lets the
