@@ -25,17 +25,25 @@ type SlicerNode struct {
 
 // SlicerCreateNodeRequest contains parameters for creating a node
 type SlicerCreateNodeRequest struct {
-	RamBytes   int64    `json:"ram_bytes,omitempty"` // RAM size in bytes (must not exceed host group limit)
-	CPUs       int      `json:"cpus,omitempty"`      // Number of CPUs (must not exceed host group limit)
-	GPUCount   int      `json:"gpu_count,omitempty"`
-	Persistent bool     `json:"persistent,omitempty"`
-	DiskImage  string   `json:"disk_image,omitempty"`
-	ImportUser string   `json:"import_user,omitempty"`
-	SSHKeys    []string `json:"ssh_keys,omitempty"`
-	Userdata   string   `json:"userdata,omitempty"`
-	IP         string   `json:"ip,omitempty"`
-	Tags       []string `json:"tags,omitempty"`
-	Secrets    []string `json:"secrets,omitempty"`
+	RamBytes   int64                          `json:"ram_bytes,omitempty"` // RAM size in bytes (must not exceed host group limit)
+	CPUs       int                            `json:"cpus,omitempty"`      // Number of CPUs (must not exceed host group limit)
+	GPUCount   int                            `json:"gpu_count,omitempty"`
+	Persistent bool                           `json:"persistent,omitempty"`
+	DiskImage  string                         `json:"disk_image,omitempty"`
+	ImportUser string                         `json:"import_user,omitempty"`
+	SSHKeys    []string                       `json:"ssh_keys,omitempty"`
+	Userdata   string                         `json:"userdata,omitempty"`
+	IP         string                         `json:"ip,omitempty"`
+	Tags       []string                       `json:"tags,omitempty"`
+	Secrets    []string                       `json:"secrets,omitempty"`
+	Network    *SlicerCreateNodeNetworkPolicy `json:"network,omitempty"`
+}
+
+// SlicerCreateNodeNetworkPolicy optionally overrides the host group's
+// isolated-network allow/drop firewall lists for this VM launch.
+type SlicerCreateNodeNetworkPolicy struct {
+	Allow []string `json:"allow,omitempty"`
+	Drop  []string `json:"drop,omitempty"`
 }
 
 // SlicerCreateNodeWaitFor controls how far the server should wait before returning.
