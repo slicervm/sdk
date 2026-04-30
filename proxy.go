@@ -51,10 +51,10 @@ type CreateProxySecretRequest struct {
 	Value string `json:"value"`
 }
 
-// ProxyAllowRule grants a ProxyClient access to one host (exact, *.suffix
-// wildcard, or "*" for any). When Secret is set, the proxy strips the
-// client-supplied Authorization on the inner request and substitutes
-// the rule-bound credential.
+// ProxyAllowRule grants a ProxyClient access to one host (exact,
+// *.suffix wildcard, or "*" for any). When Secret is set, the proxy
+// strips the client-supplied Authorization on the inner request and
+// substitutes the rule-bound credential.
 //
 // Methods and Paths are optional filters. When set, the request must
 // match at least one entry in each non-empty list. Empty list = any.
@@ -74,6 +74,21 @@ type ProxyAllowRule struct {
 	Paths       []string  `json:"paths,omitempty"`
 	Expires     time.Time `json:"expires,omitempty"`
 	Passthrough bool      `json:"passthrough,omitempty"`
+}
+
+// RemoveProxyAllowByTupleRequest mirrors the create payload (minus
+// TTLSeconds, which is not part of identity). The proxy matches the
+// rule by (host, methods, paths, passthrough) and removes it from
+// the client's allow list. Useful when the caller owns the tuple —
+// e.g. a declarative config — and wants surgical removal of one
+// rule among siblings on the same host.
+type RemoveProxyAllowByTupleRequest struct {
+	Client      string   `json:"client"`
+	Host        string   `json:"host"`
+	Secret      string   `json:"secret,omitempty"`
+	Methods     []string `json:"methods,omitempty"`
+	Paths       []string `json:"paths,omitempty"`
+	Passthrough bool     `json:"passthrough,omitempty"`
 }
 
 // AddProxyAllowRequest is the input to AddProxyAllow.
@@ -140,9 +155,20 @@ func (c *SlicerClient) AddProxyAllow(ctx context.Context, req AddProxyAllowReque
 	return c.proxyDo(ctx, http.MethodPost, "/proxy/v1/allows", req, http.StatusCreated, nil)
 }
 
-// RemoveProxyAllow revokes one allow rule for a client.
+// RemoveProxyAllow removes every allow rule for a client whose host
+// matches. This is the host-bulk verb. For surgical removal of a
+// single rule (when several share a host but differ on paths /
+// methods / passthrough) use RemoveProxyAllowByTuple.
 func (c *SlicerClient) RemoveProxyAllow(ctx context.Context, client, host string) error {
 	return c.proxyDo(ctx, http.MethodDelete, "/proxy/v1/allows/"+client+"/"+host, nil, http.StatusNoContent, nil)
+}
+
+// RemoveProxyAllowByTuple removes the single allow rule whose
+// (host, methods, paths, passthrough) tuple matches the request.
+// Callers pass the same fields they used to create the rule; TTL is
+// not part of identity and is omitted from the request type.
+func (c *SlicerClient) RemoveProxyAllowByTuple(ctx context.Context, req RemoveProxyAllowByTupleRequest) error {
+	return c.proxyDo(ctx, http.MethodPost, "/proxy/v1/allows/revoke", req, http.StatusNoContent, nil)
 }
 
 // ListProxyRules returns the client's allow rules in declaration order.
