@@ -60,22 +60,31 @@ type CreateProxySecretRequest struct {
 // match at least one entry in each non-empty list. Empty list = any.
 // Path supports exact match, "*" (any path), or "<prefix>/*" suffix
 // glob (anything strictly under the prefix).
+//
+// When Passthrough is true the proxy splices TCP both ways at CONNECT
+// without terminating TLS — no MITM, no inner-request inspection.
+// The guest does not need to trust the proxy CA on a passthrough
+// host, so cert-pinned clients work. Passthrough is mutually
+// exclusive with Secret, Methods, and Paths; the admin API rejects
+// rules that combine them.
 type ProxyAllowRule struct {
-	Host    string    `json:"host"`
-	Secret  string    `json:"secret,omitempty"`
-	Methods []string  `json:"methods,omitempty"`
-	Paths   []string  `json:"paths,omitempty"`
-	Expires time.Time `json:"expires,omitempty"`
+	Host        string    `json:"host"`
+	Secret      string    `json:"secret,omitempty"`
+	Methods     []string  `json:"methods,omitempty"`
+	Paths       []string  `json:"paths,omitempty"`
+	Expires     time.Time `json:"expires,omitempty"`
+	Passthrough bool      `json:"passthrough,omitempty"`
 }
 
 // AddProxyAllowRequest is the input to AddProxyAllow.
 type AddProxyAllowRequest struct {
-	Client     string   `json:"client"`
-	Host       string   `json:"host"`
-	Secret     string   `json:"secret,omitempty"`
-	Methods    []string `json:"methods,omitempty"`
-	Paths      []string `json:"paths,omitempty"`
-	TTLSeconds int      `json:"ttl_seconds,omitempty"`
+	Client      string   `json:"client"`
+	Host        string   `json:"host"`
+	Secret      string   `json:"secret,omitempty"`
+	Methods     []string `json:"methods,omitempty"`
+	Paths       []string `json:"paths,omitempty"`
+	TTLSeconds  int      `json:"ttl_seconds,omitempty"`
+	Passthrough bool     `json:"passthrough,omitempty"`
 }
 
 // CreateProxyClient mints a new proxy access token. setToken lets the
