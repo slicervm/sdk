@@ -28,27 +28,44 @@ type ProxyClientCreated struct {
 // Secret types. Empty value is treated as bearer for backwards compat
 // with state files / API callers that predate the field.
 const (
-	SecretTypeBearer = "bearer"
-	SecretTypeBasic  = "basic"
+	SecretTypeBearer             = "bearer"
+	SecretTypeBasic              = "basic"
+	SecretTypeOAuthCodex         = "oauth-codex"
+	SecretTypeOAuthClaude        = "oauth-claude"
+	SecretTypeOAuthGitHubCopilot = "oauth-github-copilot"
 )
 
 // ProxySecret is an upstream credential the proxy injects into matching
 // CONNECT requests. List/get endpoints never return Value.
 type ProxySecret struct {
-	Name      string    `json:"name"`
-	Host      string    `json:"host"`
-	Type      string    `json:"type,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	Name        string    `json:"name"`
+	Host        string    `json:"host"`
+	Type        string    `json:"type,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at,omitempty"`
+	AdoptedAt   time.Time `json:"adopted_at,omitempty"`
+	RefreshedAt time.Time `json:"refreshed_at,omitempty"`
 }
 
 // CreateProxySecretRequest is the input to CreateProxySecret. Type
 // defaults to SecretTypeBearer when empty. For SecretTypeBasic the
-// Value must be in user:pass form (the proxy base64-encodes it).
+// Value must be in user:pass form (the proxy base64-encodes it). For
+// SecretTypeOAuthCodex the Value must be a Codex auth.json or minimal
+// OAuth JSON containing access_token, refresh_token, and account_id;
+// the proxy adopts it and refreshes it from host-side state.
+// For SecretTypeOAuthClaude the Value must be Claude Code's
+// .credentials.json or minimal OAuth JSON containing accessToken and
+// refreshToken; the proxy adopts it and refreshes it from host-side state.
+// For SecretTypeOAuthGitHubCopilot the Value must be opencode auth.json
+// or minimal OAuth JSON containing a GitHub Copilot ghu_* token; the
+// proxy exchanges it for short-lived Copilot session tokens and stores
+// the returned API endpoint in host-side state.
 type CreateProxySecretRequest struct {
 	Name  string `json:"name"`
 	Host  string `json:"host"`
 	Type  string `json:"type,omitempty"`
 	Value string `json:"value"`
+	Force bool   `json:"force,omitempty"`
 }
 
 // ProxyAllowRule grants a ProxyClient access to one host (exact,
@@ -61,6 +78,10 @@ type CreateProxySecretRequest struct {
 // Path supports exact match, "*" (any path), or "<prefix>/*" suffix
 // glob (anything strictly under the prefix).
 //
+// Ports is optional. Empty means the default web ports 80 and 443 for
+// backwards compatibility with older host-only rules. When set, the
+// request must target one of the listed upstream ports.
+//
 // When Passthrough is true the proxy splices TCP both ways at CONNECT
 // without terminating TLS — no MITM, no inner-request inspection.
 // The guest does not need to trust the proxy CA on a passthrough
@@ -72,13 +93,14 @@ type ProxyAllowRule struct {
 	Secret      string    `json:"secret,omitempty"`
 	Methods     []string  `json:"methods,omitempty"`
 	Paths       []string  `json:"paths,omitempty"`
+	Ports       []int     `json:"ports,omitempty"`
 	Expires     time.Time `json:"expires,omitempty"`
 	Passthrough bool      `json:"passthrough,omitempty"`
 }
 
 // RemoveProxyAllowByTupleRequest mirrors the create payload (minus
 // TTLSeconds, which is not part of identity). The proxy matches the
-// rule by (host, methods, paths, passthrough) and removes it from
+// rule by (host, methods, paths, ports, passthrough) and removes it from
 // the client's allow list. Useful when the caller owns the tuple —
 // e.g. a declarative config — and wants surgical removal of one
 // rule among siblings on the same host.
@@ -88,6 +110,7 @@ type RemoveProxyAllowByTupleRequest struct {
 	Secret      string   `json:"secret,omitempty"`
 	Methods     []string `json:"methods,omitempty"`
 	Paths       []string `json:"paths,omitempty"`
+	Ports       []int    `json:"ports,omitempty"`
 	Passthrough bool     `json:"passthrough,omitempty"`
 }
 
@@ -98,6 +121,7 @@ type AddProxyAllowRequest struct {
 	Secret      string   `json:"secret,omitempty"`
 	Methods     []string `json:"methods,omitempty"`
 	Paths       []string `json:"paths,omitempty"`
+	Ports       []int    `json:"ports,omitempty"`
 	TTLSeconds  int      `json:"ttl_seconds,omitempty"`
 	Passthrough bool     `json:"passthrough,omitempty"`
 }
