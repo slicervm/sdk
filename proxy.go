@@ -57,9 +57,9 @@ type ProxySecret struct {
 // .credentials.json or minimal OAuth JSON containing accessToken and
 // refreshToken; the proxy adopts it and refreshes it from host-side state.
 // For SecretTypeOAuthGitHubCopilot the Value must be opencode auth.json
-// or minimal OAuth JSON containing a GitHub Copilot ghu_* token; the
-// proxy exchanges it for short-lived Copilot session tokens and stores
-// the returned API endpoint in host-side state.
+// or minimal OAuth JSON containing a GitHub Copilot gho_* or ghu_* token;
+// gho_* tokens are sent directly to api.githubcopilot.com, while legacy
+// ghu_* tokens are exchanged for short-lived Copilot session tokens.
 type CreateProxySecretRequest struct {
 	Name  string `json:"name"`
 	Host  string `json:"host"`
