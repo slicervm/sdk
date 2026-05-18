@@ -37,8 +37,9 @@ func (m *AddressMapping) ListenUnix() bool { return m.ListenUnixPath != "" }
 func (m *AddressMapping) RemoteUnix() bool { return m.RemoteUnixPath != "" }
 
 // RemoteTarget renders the X-Inlets-Upstream header value.
-//   TCP:  "host:port"
-//   Unix: "unix:/path/to/socket"
+//
+//	TCP:  "host:port"
+//	Unix: "unix:/path/to/socket"
 func (m *AddressMapping) RemoteTarget() string {
 	if m.RemoteUnix() {
 		return "unix:" + m.RemoteUnixPath
@@ -56,14 +57,14 @@ func (m *AddressMapping) ListenAddress() string {
 
 // ParseAddressMapping parses a -L-style spec. Supported formats:
 //
-//   127.0.0.1:9000                               TCP, listen and forward same host:port
-//   9001:127.0.0.1:9000                          TCP, listen 0.0.0.0:9001 → 127.0.0.1:9000
-//   0:127.0.0.1:9000                             TCP, random listen port → 127.0.0.1:9000
-//   0.0.0.0:9000:127.0.0.1:9000                  TCP, fully explicit
-//   127.0.0.1:9000:/var/run/docker.sock          TCP listen, Unix socket forward
-//   9000:/var/run/docker.sock                    TCP listen 0.0.0.0:9000, Unix socket forward
-//   /tmp/docker.sock:/var/run/docker.sock        Unix-to-Unix
-//   ./docker.sock:/var/run/docker.sock           Unix-to-Unix with relative local path
+//	127.0.0.1:9000                               TCP, listen and forward same host:port
+//	9001:127.0.0.1:9000                          TCP, listen 0.0.0.0:9001 → 127.0.0.1:9000
+//	0:127.0.0.1:9000                             TCP, random listen port → 127.0.0.1:9000
+//	0.0.0.0:9000:127.0.0.1:9000                  TCP, fully explicit
+//	127.0.0.1:9000:/var/run/docker.sock          TCP listen, Unix socket forward
+//	9000:/var/run/docker.sock                    TCP listen 0.0.0.0:9000, Unix socket forward
+//	/tmp/docker.sock:/var/run/docker.sock        Unix-to-Unix
+//	./docker.sock:/var/run/docker.sock           Unix-to-Unix with relative local path
 func ParseAddressMapping(spec string) (*AddressMapping, error) {
 	spec = strings.TrimSpace(spec)
 	if spec == "" {
