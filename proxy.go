@@ -33,6 +33,7 @@ const (
 	SecretTypeOAuthCodex         = "oauth-codex"
 	SecretTypeOAuthClaude        = "oauth-claude"
 	SecretTypeOAuthGitHubCopilot = "oauth-github-copilot"
+	SecretTypeOAuthXAI           = "oauth-xai"
 )
 
 // ProxySecret is an upstream credential the proxy injects into matching
@@ -60,6 +61,10 @@ type ProxySecret struct {
 // or minimal OAuth JSON containing a GitHub Copilot gho_* or ghu_* token;
 // gho_* tokens are sent directly to api.githubcopilot.com, while legacy
 // ghu_* tokens are exchanged for short-lived Copilot session tokens.
+// For SecretTypeOAuthXAI the Value must be JSON emitted by
+// `slicer proxy oauth xai`, or equivalent top-level JSON containing
+// access_token and refresh_token; the proxy injects the current bearer
+// for api.x.ai and refreshes it host-side.
 type CreateProxySecretRequest struct {
 	Name  string `json:"name"`
 	Host  string `json:"host"`
