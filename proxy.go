@@ -34,6 +34,7 @@ const (
 	SecretTypeOAuthClaude        = "oauth-claude"
 	SecretTypeOAuthGitHubCopilot = "oauth-github-copilot"
 	SecretTypeOAuthXAI           = "oauth-xai"
+	SecretTypeGitHubApp          = "github-app"
 )
 
 // ProxySecret is an upstream credential the proxy injects into matching
@@ -65,6 +66,11 @@ type ProxySecret struct {
 // `slicer proxy oauth xai`, or equivalent top-level JSON containing
 // access_token and refresh_token; the proxy injects the current bearer
 // for api.x.ai and refreshes it host-side.
+// For SecretTypeGitHubApp the Value must be JSON or YAML containing app_id
+// and either private_key_file or private_key. With private_key_file, the proxy
+// keeps the PEM file on the host; with private_key, the PEM is stored in proxy
+// state. The proxy mints GitHub App installation tokens in memory and injects
+// Git HTTPS Basic auth for github.com clone/fetch requests.
 type CreateProxySecretRequest struct {
 	Name  string `json:"name"`
 	Host  string `json:"host"`
