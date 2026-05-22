@@ -34,6 +34,7 @@ const (
 	SecretTypeOAuthClaude        = "oauth-claude"
 	SecretTypeOAuthGitHubCopilot = "oauth-github-copilot"
 	SecretTypeOAuthXAI           = "oauth-xai"
+	SecretTypeGitHubAppUser      = "github-app-user"
 	SecretTypeGitHubApp          = "github-app"
 )
 
@@ -66,6 +67,10 @@ type ProxySecret struct {
 // `slicer proxy oauth xai`, or equivalent top-level JSON containing
 // access_token and refresh_token; the proxy injects the current bearer
 // for api.x.ai and refreshes it host-side.
+// For SecretTypeGitHubAppUser the Value must be JSON emitted by
+// `slicer proxy oauth github-app-user`, or equivalent top-level JSON
+// containing access_token. Optional refresh material is stored and refreshed
+// host-side; requests receive Authorization: Bearer <access-token>.
 // For SecretTypeGitHubApp the Value must be JSON or YAML containing app_id
 // and either private_key_file or private_key. With private_key_file, the proxy
 // keeps the PEM file on the host; with private_key, the PEM is stored in proxy
