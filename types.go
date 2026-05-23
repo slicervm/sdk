@@ -262,6 +262,9 @@ type SlicerAgentHealthResponse struct {
 
 	// UserdataRan indicates whether the user data script has completed executing
 	UserdataRan bool `json:"userdata_ran,omitempty"`
+
+	// IP is the guest's primary IPv4 address, as reported by the agent.
+	IP string `json:"ip,omitempty"`
 }
 
 // SlicerShutdownRequest contains parameters for shutting down or rebooting a VM.
