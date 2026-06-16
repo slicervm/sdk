@@ -77,11 +77,12 @@ type ProxySecret struct {
 // state. The proxy mints GitHub App installation tokens in memory and injects
 // Git HTTPS Basic auth for github.com clone/fetch requests.
 type CreateProxySecretRequest struct {
-	Name  string `json:"name"`
-	Host  string `json:"host"`
-	Type  string `json:"type,omitempty"`
-	Value string `json:"value"`
-	Force bool   `json:"force,omitempty"`
+	Name       string `json:"name"`
+	Host       string `json:"host"`
+	Type       string `json:"type,omitempty"`
+	Value      string `json:"value"`
+	SourceFile string `json:"source_file,omitempty"`
+	Force      bool   `json:"force,omitempty"`
 }
 
 // ProxyAllowRule grants a ProxyClient access to one host (exact,
