@@ -21,27 +21,18 @@ func StreamTarArchive(ctx context.Context, w io.Writer, parentDir, baseName stri
 	sourcePath := filepath.Join(parentDir, baseName)
 	excludes := normalizeExcludePatterns(excludePatterns...)
 
-	return filepath.Walk(sourcePath, func(path string, info os.FileInfo, err error) error {
+	return filepath.Walk(sourcePath, func(path string, info os.FileInfo, walkErr error) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
 		}
 
-		if err != nil {
-			return err
-		}
-
-		// Skip non-regular files and non-directories
-		if !info.Mode().IsRegular() && !info.IsDir() {
-			return nil
-		}
-
 		// Make paths relative to sourcePath (not parentDir) so that copying /etc
 		// creates entries like "passwd" not "etc/passwd"
-		relPath, err := filepath.Rel(sourcePath, path)
-		if err != nil {
-			return fmt.Errorf("failed to get relative path: %w", err)
+		relPath, relErr := filepath.Rel(sourcePath, path)
+		if relErr != nil {
+			return fmt.Errorf("failed to get relative path: %w", relErr)
 		}
 
 		// Skip the source directory itself
@@ -51,9 +42,18 @@ func StreamTarArchive(ctx context.Context, w io.Writer, parentDir, baseName stri
 
 		relPath = filepath.ToSlash(relPath)
 		if shouldExcludePath(relPath, excludes) {
-			if info.IsDir() {
+			if info != nil && info.IsDir() {
 				return filepath.SkipDir
 			}
+			return nil
+		}
+
+		if walkErr != nil {
+			return walkErr
+		}
+
+		// Skip non-regular files and non-directories
+		if !info.Mode().IsRegular() && !info.IsDir() {
 			return nil
 		}
 
@@ -97,6 +97,50 @@ func StreamTarArchive(ctx context.Context, w io.Writer, parentDir, baseName stri
 
 		return nil
 	})
+}
+
+// EstimateTarUnpackedSize returns the total regular-file byte size that
+// StreamTarArchive would include for the same source and exclude set.
+func EstimateTarUnpackedSize(ctx context.Context, parentDir, baseName string, excludePatterns ...string) (int64, error) {
+	sourcePath := filepath.Join(parentDir, baseName)
+	excludes := normalizeExcludePatterns(excludePatterns...)
+	var total int64
+
+	err := filepath.Walk(sourcePath, func(path string, info os.FileInfo, walkErr error) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		relPath, relErr := filepath.Rel(sourcePath, path)
+		if relErr != nil {
+			return fmt.Errorf("failed to get relative path: %w", relErr)
+		}
+		if relPath == "." {
+			return nil
+		}
+
+		relPath = filepath.ToSlash(relPath)
+		if shouldExcludePath(relPath, excludes) {
+			if info != nil && info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.Mode().IsRegular() {
+			total += info.Size()
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return total, nil
 }
 
 func shouldExcludePath(relPath string, excludes []string) bool {

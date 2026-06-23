@@ -14,6 +14,7 @@ import (
 )
 
 const fileModeHeader = "X-Slicer-File-Mode"
+const unpackedSizeHeader = "X-Slicer-Unpacked-Size"
 
 // getCurrentUIDGID returns the current user's UID and GID.
 // On Windows, returns 0,0 (chown operations will be skipped).
@@ -110,6 +111,11 @@ func copyToVMTar(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath st
 	parentDir := filepath.Dir(absSrc)
 	baseName := filepath.Base(absSrc)
 
+	unpackedSize, err := EstimateTarUnpackedSize(ctx, parentDir, baseName, excludePatterns...)
+	if err != nil {
+		return fmt.Errorf("failed to estimate tar unpacked size: %w", err)
+	}
+
 	pr, pw := io.Pipe()
 	defer pr.Close()
 
@@ -154,6 +160,7 @@ func copyToVMTar(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath st
 	}
 
 	req.Header.Set("Content-Type", "application/x-tar")
+	req.Header.Set(unpackedSizeHeader, strconv.FormatInt(unpackedSize, 10))
 	c.setAuthHeaders(req)
 
 	res, err := c.httpClient.Do(req)
