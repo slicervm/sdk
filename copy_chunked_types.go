@@ -7,11 +7,11 @@ import (
 
 const (
 	ChunkedCopyManifestVersion = 1
-	DefaultCopyChunkSize       = 32 << 20
+	DefaultCopyChunkSize       = 64 << 20
 	DefaultCopyConcurrency     = 4
 )
 
-// CopyChunk describes one content-addressed part of a chunked copy stream.
+// CopyChunk describes one checksummed part of a chunked copy stream.
 type CopyChunk struct {
 	Index  int    `json:"index"`
 	Size   int64  `json:"size"`
@@ -29,7 +29,6 @@ type CopyManifest struct {
 	GID          uint32      `json:"gid"`
 	Permissions  string      `json:"permissions,omitempty"`
 	Size         int64       `json:"size"`
-	SHA256       string      `json:"sha256"`
 	UnpackedSize int64       `json:"unpacked_size,omitempty"`
 	Chunks       []CopyChunk `json:"chunks"`
 }
@@ -47,7 +46,7 @@ type ChunkedCopyOptions struct {
 
 // CopyChunkFileName returns the portable on-guest filename for a chunk.
 func CopyChunkFileName(chunk CopyChunk) string {
-	return fmt.Sprintf("%06d-%s.chunk", chunk.Index, chunk.SHA256)
+	return fmt.Sprintf("%06d.chunk", chunk.Index)
 }
 
 // Validate checks the portable manifest independently of any filesystem.
@@ -64,10 +63,6 @@ func (m CopyManifest) Validate() error {
 	if m.Size < 0 || m.UnpackedSize < 0 {
 		return fmt.Errorf("copy sizes must not be negative")
 	}
-	if !validSHA256(m.SHA256) {
-		return fmt.Errorf("invalid complete SHA-256: %q", m.SHA256)
-	}
-
 	var total int64
 	for i, chunk := range m.Chunks {
 		if chunk.Index != i {

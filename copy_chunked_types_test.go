@@ -12,7 +12,6 @@ func TestCopyManifestValidate(t *testing.T) {
 		Mode:        "binary",
 		Destination: "/home/ubuntu/tool",
 		Size:        3,
-		SHA256:      digest,
 		Chunks: []CopyChunk{{
 			Index:  0,
 			Size:   3,
@@ -39,7 +38,7 @@ func TestCopyManifestValidate(t *testing.T) {
 
 func TestCopyChunkFileName(t *testing.T) {
 	chunk := CopyChunk{Index: 12, SHA256: strings.Repeat("b", 64)}
-	want := "000012-" + strings.Repeat("b", 64) + ".chunk"
+	want := "000012.chunk"
 	if got := CopyChunkFileName(chunk); got != want {
 		t.Fatalf("CopyChunkFileName() = %q, want %q", got, want)
 	}

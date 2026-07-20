@@ -26,8 +26,24 @@ var ErrChunkedCopyUnsupported = errors.New("chunked copy is not supported by the
 const slicerAgentPath = "/usr/local/bin/slicer-agent"
 
 type copyChunkUpload struct {
-	descriptor CopyChunk
-	data       []byte
+	index  int
+	offset int64
+}
+
+type preparedCopySource struct {
+	file         *os.File
+	size         int64
+	unpackedSize int64
+	cleanup      func() error
+}
+
+type byteCounter struct {
+	n int64
+}
+
+func (c *byteCounter) Write(p []byte) (int, error) {
+	c.n += int64(len(p))
+	return len(p), nil
 }
 
 // SupportsChunkedCopy reports whether the guest agent provides the upload
@@ -47,8 +63,8 @@ func (c *SlicerClient) SupportsChunkedCopy(ctx context.Context, vmName string) (
 	return result.ExitCode == 0, nil
 }
 
-// CpToVMChunked copies a file or generated tar stream in bounded,
-// content-addressed requests, then asks slicer-agent to validate and assemble
+// CpToVMChunked copies a file or staged tar stream in bounded, checksummed
+// requests, then asks slicer-agent to validate and assemble
 // the manifest inside the guest.
 func (c *SlicerClient) CpToVMChunked(ctx context.Context, vmName, localPath, vmPath string, opts ChunkedCopyOptions) error {
 	if opts.ChunkSize == 0 {
@@ -79,14 +95,6 @@ func (c *SlicerClient) CpToVMChunked(ctx context.Context, vmName, localPath, vmP
 	if err != nil {
 		return fmt.Errorf("get absolute source path: %w", err)
 	}
-	info, err := os.Stat(absSrc)
-	if err != nil {
-		return fmt.Errorf("stat source: %w", err)
-	}
-	if opts.Mode == "binary" && !info.Mode().IsRegular() {
-		return fmt.Errorf("binary source must be a regular file: %s", localPath)
-	}
-
 	sessionID, err := newCopySessionID()
 	if err != nil {
 		return err
@@ -97,11 +105,11 @@ func (c *SlicerClient) CpToVMChunked(ctx context.Context, vmName, localPath, vmP
 	}
 	manifestPath := pathpkg.Join(sessionPath, "manifest.json")
 
-	source, unpackedSize, waitSource, err := openChunkedCopySource(ctx, absSrc, opts)
+	source, err := prepareChunkedCopySource(ctx, absSrc, opts)
 	if err != nil {
 		return err
 	}
-	defer source.Close()
+	defer source.cleanup()
 
 	complete := false
 	defer func() {
@@ -120,49 +128,23 @@ func (c *SlicerClient) CpToVMChunked(ctx context.Context, vmName, localPath, vmP
 		UID:          opts.UID,
 		GID:          opts.GID,
 		Permissions:  opts.Permissions,
-		UnpackedSize: unpackedSize,
+		UnpackedSize: source.unpackedSize,
 		Chunks:       []CopyChunk{},
 	}
-	wholeHash := sha256.New()
-	readComplete := false
-
-	for !readComplete {
-		batch := make([]copyChunkUpload, 0, opts.Concurrency)
-		for len(batch) < opts.Concurrency && !readComplete {
-			buf := make([]byte, opts.ChunkSize)
-			n, readErr := io.ReadFull(source, buf)
-			switch readErr {
-			case nil:
-			case io.EOF, io.ErrUnexpectedEOF:
-				readComplete = true
-			default:
-				return fmt.Errorf("read copy stream: %w", readErr)
-			}
-			if n == 0 {
-				continue
-			}
-			buf = buf[:n]
-			_, _ = wholeHash.Write(buf)
-			sum := sha256.Sum256(buf)
-			chunk := CopyChunk{
-				Index:  len(manifest.Chunks),
-				Size:   int64(n),
-				SHA256: hex.EncodeToString(sum[:]),
-			}
-			manifest.Chunks = append(manifest.Chunks, chunk)
-			manifest.Size += int64(n)
-			batch = append(batch, copyChunkUpload{descriptor: chunk, data: buf})
+	for offset := int64(0); offset < source.size; offset += int64(opts.ChunkSize) {
+		size := int64(opts.ChunkSize)
+		if remaining := source.size - offset; remaining < size {
+			size = remaining
 		}
-
-		if err := c.uploadCopyChunkBatch(ctx, vmName, sessionPath, opts, batch); err != nil {
-			return err
-		}
+		manifest.Chunks = append(manifest.Chunks, CopyChunk{
+			Index: len(manifest.Chunks),
+			Size:  size,
+		})
 	}
-
-	if err := waitSource(); err != nil {
-		return fmt.Errorf("produce copy stream: %w", err)
+	manifest.Size = source.size
+	if err := c.uploadCopyChunks(ctx, vmName, sessionPath, opts, source.file, &manifest); err != nil {
+		return err
 	}
-	manifest.SHA256 = hex.EncodeToString(wholeHash.Sum(nil))
 	if err := manifest.Validate(); err != nil {
 		return fmt.Errorf("validate generated copy manifest: %w", err)
 	}
@@ -202,31 +184,73 @@ func (c *SlicerClient) CpToVMChunked(ctx context.Context, vmName, localPath, vmP
 	return nil
 }
 
-func (c *SlicerClient) uploadCopyChunkBatch(ctx context.Context, vmName, sessionPath string, opts ChunkedCopyOptions, batch []copyChunkUpload) error {
+func (c *SlicerClient) uploadCopyChunks(ctx context.Context, vmName, sessionPath string, opts ChunkedCopyOptions, source *os.File, manifest *CopyManifest) error {
+	uploadCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	jobs := make(chan copyChunkUpload)
 	var wg sync.WaitGroup
 	var firstErr error
-	var errMu sync.Mutex
+	var errOnce sync.Once
+	workerCount := opts.Concurrency
+	if len(manifest.Chunks) < workerCount {
+		workerCount = len(manifest.Chunks)
+	}
 
-	for _, item := range batch {
-		item := item
+	for i := 0; i < workerCount; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			chunkPath := pathpkg.Join(sessionPath, "chunks", CopyChunkFileName(item.descriptor))
-			if err := c.uploadCopyBytes(ctx, vmName, chunkPath, opts.UID, opts.GID, item.data); err != nil {
-				errMu.Lock()
-				if firstErr == nil {
-					firstErr = fmt.Errorf("upload chunk %d: %w", item.descriptor.Index, err)
+			for job := range jobs {
+				chunk := &manifest.Chunks[job.index]
+				section := io.NewSectionReader(source, job.offset, chunk.Size)
+				hasher := sha256.New()
+				counter := &byteCounter{}
+				reader := io.TeeReader(section, io.MultiWriter(hasher, counter))
+				chunkPath := pathpkg.Join(sessionPath, "chunks", CopyChunkFileName(*chunk))
+				err := c.uploadCopyReader(uploadCtx, vmName, chunkPath, opts.UID, opts.GID, reader, chunk.Size)
+				if err == nil && counter.n != chunk.Size {
+					err = fmt.Errorf("streamed %d bytes, expected %d", counter.n, chunk.Size)
 				}
-				errMu.Unlock()
+				if err != nil {
+					errOnce.Do(func() {
+						firstErr = fmt.Errorf("upload chunk %d: %w", chunk.Index, err)
+						cancel()
+					})
+					continue
+				}
+				chunk.SHA256 = hex.EncodeToString(hasher.Sum(nil))
 			}
 		}()
 	}
+
+	offset := int64(0)
+	for i := range manifest.Chunks {
+		select {
+		case jobs <- copyChunkUpload{index: i, offset: offset}:
+			offset += manifest.Chunks[i].Size
+		case <-uploadCtx.Done():
+			close(jobs)
+			wg.Wait()
+			if firstErr != nil {
+				return firstErr
+			}
+			return uploadCtx.Err()
+		}
+	}
+	close(jobs)
 	wg.Wait()
+	if firstErr == nil && ctx.Err() != nil {
+		return ctx.Err()
+	}
 	return firstErr
 }
 
 func (c *SlicerClient) uploadCopyBytes(ctx context.Context, vmName, vmPath string, uid, gid uint32, data []byte) error {
+	return c.uploadCopyReader(ctx, vmName, vmPath, uid, gid, bytes.NewReader(data), int64(len(data)))
+}
+
+func (c *SlicerClient) uploadCopyReader(ctx context.Context, vmName, vmPath string, uid, gid uint32, reader io.Reader, size int64) error {
 	u, err := url.Parse(c.baseURL)
 	if err != nil {
 		return fmt.Errorf("parse Slicer URL: %w", err)
@@ -244,11 +268,12 @@ func (c *SlicerClient) uploadCopyBytes(ctx context.Context, vmName, vmPath strin
 	}
 	u.RawQuery = q.Encode()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), reader)
 	if err != nil {
 		return fmt.Errorf("create chunk request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/octet-stream")
+	req.ContentLength = size
 	c.setAuthHeaders(req)
 
 	res, err := c.httpClient.Do(req)
@@ -262,7 +287,10 @@ func (c *SlicerClient) uploadCopyBytes(ctx context.Context, vmName, vmPath strin
 		}()
 	}
 	if res.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(res.Body, 64<<10))
+		var body []byte
+		if res.Body != nil {
+			body, _ = io.ReadAll(io.LimitReader(res.Body, 64<<10))
+		}
 		return fmt.Errorf("copy chunk to VM: %s: %s", res.Status, strings.TrimSpace(string(body)))
 	}
 	return nil
@@ -291,33 +319,66 @@ func (c *SlicerClient) abortChunkedCopy(ctx context.Context, vmName, manifestPat
 	return nil
 }
 
-func openChunkedCopySource(ctx context.Context, absSrc string, opts ChunkedCopyOptions) (io.ReadCloser, int64, func() error, error) {
+func prepareChunkedCopySource(ctx context.Context, absSrc string, opts ChunkedCopyOptions) (preparedCopySource, error) {
 	if opts.Mode == "binary" {
 		f, err := os.Open(absSrc)
 		if err != nil {
-			return nil, 0, nil, fmt.Errorf("open binary source: %w", err)
+			return preparedCopySource{}, fmt.Errorf("open binary source: %w", err)
 		}
-		return f, 0, func() error { return nil }, nil
+		info, err := f.Stat()
+		if err != nil {
+			_ = f.Close()
+			return preparedCopySource{}, fmt.Errorf("stat binary source: %w", err)
+		}
+		if !info.Mode().IsRegular() {
+			_ = f.Close()
+			return preparedCopySource{}, fmt.Errorf("binary source must be a regular file: %s", absSrc)
+		}
+		return preparedCopySource{
+			file: f,
+			size: info.Size(),
+			cleanup: func() error {
+				return f.Close()
+			},
+		}, nil
 	}
 
 	parentDir := filepath.Dir(absSrc)
 	baseName := filepath.Base(absSrc)
 	unpackedSize, err := EstimateTarUnpackedSize(ctx, parentDir, baseName, opts.ExcludePatterns...)
 	if err != nil {
-		return nil, 0, nil, fmt.Errorf("estimate tar size: %w", err)
+		return preparedCopySource{}, fmt.Errorf("estimate tar size: %w", err)
 	}
-	pr, pw := io.Pipe()
-	errCh := make(chan error, 1)
-	go func() {
-		err := StreamTarArchive(ctx, pw, parentDir, baseName, opts.ExcludePatterns...)
-		if err != nil {
-			_ = pw.CloseWithError(err)
-		} else {
-			_ = pw.Close()
-		}
-		errCh <- err
-	}()
-	return pr, unpackedSize, func() error { return <-errCh }, nil
+	staged, err := os.CreateTemp(parentDir, ".slicer-upload-*.tar")
+	if err != nil {
+		return preparedCopySource{}, fmt.Errorf("create staged tar beside source: %w", err)
+	}
+	removeStaged := func() {
+		_ = staged.Close()
+		_ = os.Remove(staged.Name())
+	}
+	if err := StreamTarArchive(ctx, staged, parentDir, baseName, opts.ExcludePatterns...); err != nil {
+		removeStaged()
+		return preparedCopySource{}, fmt.Errorf("create staged tar: %w", err)
+	}
+	info, err := staged.Stat()
+	if err != nil {
+		removeStaged()
+		return preparedCopySource{}, fmt.Errorf("stat staged tar: %w", err)
+	}
+	return preparedCopySource{
+		file:         staged,
+		size:         info.Size(),
+		unpackedSize: unpackedSize,
+		cleanup: func() error {
+			closeErr := staged.Close()
+			removeErr := os.Remove(staged.Name())
+			if closeErr != nil {
+				return closeErr
+			}
+			return removeErr
+		},
+	}, nil
 }
 
 func newCopySessionID() (string, error) {
