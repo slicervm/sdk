@@ -1,0 +1,102 @@
+package slicer
+
+import (
+	"encoding/hex"
+	"fmt"
+)
+
+const (
+	ChunkedCopyManifestVersion = 1
+	DefaultCopyChunkSize       = 32 << 20
+	DefaultCopyConcurrency     = 4
+)
+
+// CopyChunk describes one content-addressed part of a chunked copy stream.
+type CopyChunk struct {
+	Index  int    `json:"index"`
+	Size   int64  `json:"size"`
+	SHA256 string `json:"sha256"`
+}
+
+// CopyManifest describes the ordered byte stream and its final destination.
+// The format is deliberately small so it can be implemented consistently by
+// the Go, TypeScript, and Python SDKs.
+type CopyManifest struct {
+	Version      int         `json:"version"`
+	Mode         string      `json:"mode"`
+	Destination  string      `json:"destination"`
+	UID          uint32      `json:"uid"`
+	GID          uint32      `json:"gid"`
+	Permissions  string      `json:"permissions,omitempty"`
+	Size         int64       `json:"size"`
+	SHA256       string      `json:"sha256"`
+	UnpackedSize int64       `json:"unpacked_size,omitempty"`
+	Chunks       []CopyChunk `json:"chunks"`
+}
+
+// ChunkedCopyOptions controls a host-to-VM chunked copy.
+type ChunkedCopyOptions struct {
+	UID             uint32
+	GID             uint32
+	Permissions     string
+	Mode            string
+	ExcludePatterns []string
+	ChunkSize       int
+	Concurrency     int
+}
+
+// CopyChunkFileName returns the portable on-guest filename for a chunk.
+func CopyChunkFileName(chunk CopyChunk) string {
+	return fmt.Sprintf("%06d-%s.chunk", chunk.Index, chunk.SHA256)
+}
+
+// Validate checks the portable manifest independently of any filesystem.
+func (m CopyManifest) Validate() error {
+	if m.Version != ChunkedCopyManifestVersion {
+		return fmt.Errorf("unsupported copy manifest version: %d", m.Version)
+	}
+	if m.Mode != "binary" && m.Mode != "tar" {
+		return fmt.Errorf("invalid copy mode: %q", m.Mode)
+	}
+	if m.Destination == "" {
+		return fmt.Errorf("copy destination is required")
+	}
+	if m.Size < 0 || m.UnpackedSize < 0 {
+		return fmt.Errorf("copy sizes must not be negative")
+	}
+	if !validSHA256(m.SHA256) {
+		return fmt.Errorf("invalid complete SHA-256: %q", m.SHA256)
+	}
+
+	var total int64
+	for i, chunk := range m.Chunks {
+		if chunk.Index != i {
+			return fmt.Errorf("chunk index %d is out of sequence, expected %d", chunk.Index, i)
+		}
+		if chunk.Size <= 0 {
+			return fmt.Errorf("chunk %d has invalid size %d", i, chunk.Size)
+		}
+		if !validSHA256(chunk.SHA256) {
+			return fmt.Errorf("chunk %d has invalid SHA-256: %q", i, chunk.SHA256)
+		}
+		if total > m.Size-chunk.Size {
+			return fmt.Errorf("chunk sizes exceed declared stream size")
+		}
+		total += chunk.Size
+	}
+	if total != m.Size {
+		return fmt.Errorf("chunk sizes total %d bytes, expected %d", total, m.Size)
+	}
+	if m.Size > 0 && len(m.Chunks) == 0 {
+		return fmt.Errorf("non-empty copy has no chunks")
+	}
+	return nil
+}
+
+func validSHA256(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	decoded, err := hex.DecodeString(value)
+	return err == nil && len(decoded) == 32
+}
