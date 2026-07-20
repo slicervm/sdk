@@ -28,14 +28,15 @@ type ProxyClientCreated struct {
 // Secret types. Empty value is treated as bearer for backwards compat
 // with state files / API callers that predate the field.
 const (
-	SecretTypeBearer             = "bearer"
-	SecretTypeBasic              = "basic"
-	SecretTypeOAuthCodex         = "oauth-codex"
-	SecretTypeOAuthClaude        = "oauth-claude"
-	SecretTypeOAuthGitHubCopilot = "oauth-github-copilot"
-	SecretTypeOAuthXAI           = "oauth-xai"
-	SecretTypeGitHubAppUser      = "github-app-user"
-	SecretTypeGitHubApp          = "github-app"
+	SecretTypeBearer                 = "bearer"
+	SecretTypeBasic                  = "basic"
+	SecretTypeOAuthCodex             = "oauth-codex"
+	SecretTypeOAuthClaude            = "oauth-claude"
+	SecretTypeOAuthGitHubCopilot     = "oauth-github-copilot"
+	SecretTypeOAuthXAI               = "oauth-xai"
+	SecretTypeOAuthClientCredentials = "oauth-client-creds"
+	SecretTypeGitHubAppUser          = "github-app-user"
+	SecretTypeGitHubApp              = "github-app"
 )
 
 // ProxySecret is an upstream credential the proxy injects into matching
@@ -67,6 +68,9 @@ type ProxySecret struct {
 // `slicer proxy oauth xai`, or equivalent top-level JSON containing
 // access_token and refresh_token; the proxy injects the current bearer
 // for api.x.ai and refreshes it host-side.
+// For SecretTypeOAuthClientCredentials the Value must be top-level JSON containing
+// token_endpoint, client_id, and client_secret. An optional scope is supported;
+// the proxy obtains, caches, and renews the bearer token host-side.
 // For SecretTypeGitHubAppUser the Value must be JSON emitted by
 // `slicer proxy oauth github-app-user`, or equivalent top-level JSON
 // containing access_token. Optional refresh material is stored and refreshed
