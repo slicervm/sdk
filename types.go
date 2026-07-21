@@ -263,6 +263,10 @@ type SlicerAgentHealthResponse struct {
 	// UserdataRan indicates whether the user data script has completed executing
 	UserdataRan bool `json:"userdata_ran,omitempty"`
 
+	// UserdataExitCode is the user data script's exit code. Nil means the
+	// script is still running, or the guest has a legacy empty completion marker.
+	UserdataExitCode *int `json:"userdata_exit_code,omitempty"`
+
 	// IP is the guest's primary IPv4 address, as reported by the agent.
 	IP string `json:"ip,omitempty"`
 }
