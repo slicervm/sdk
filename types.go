@@ -83,6 +83,76 @@ type SlicerRestoreVMOptions struct {
 	Timeout time.Duration `json:"-"`
 }
 
+// SlicerForkVMOptions controls readiness and isolated networking for a cold
+// fork. Fork always waits for the child agent to finalise guest identity.
+type SlicerForkVMOptions struct {
+	Timeout time.Duration              `json:"-"`
+	Network *SlicerForkVMNetworkPolicy `json:"-"`
+}
+
+// SlicerForkVMNetworkPolicy optionally overrides the host group's isolated
+// network allow/drop lists. Nil fields inherit; non-nil empty slices clear a
+// list.
+type SlicerForkVMNetworkPolicy struct {
+	Allow *[]string `json:"allow,omitempty"`
+	Drop  *[]string `json:"drop,omitempty"`
+}
+
+type SlicerCommitVMOptions struct {
+	Tags     []string          `json:"tags,omitempty"`
+	Labels   map[string]string `json:"labels,omitempty"`
+	CacheKey string            `json:"cache_key,omitempty"`
+}
+
+type SlicerCommitVMResponse struct {
+	Hostname     string            `json:"hostname"`
+	CommitID     string            `json:"commit_id"`
+	Status       string            `json:"status"`
+	ParentStatus string            `json:"parent_status,omitempty"`
+	Mode         string            `json:"mode"`
+	Tags         []string          `json:"tags,omitempty"`
+	Labels       map[string]string `json:"labels,omitempty"`
+	CacheKey     string            `json:"cache_key,omitempty"`
+}
+
+type SlicerCommitListOptions struct {
+	Tags     []string
+	CacheKey string
+	Source   string
+	Mode     string
+}
+
+type SlicerCommitInfo struct {
+	CommitID        string            `json:"commit_id"`
+	SourceHostname  string            `json:"source_hostname"`
+	SourceHostGroup string            `json:"source_host_group"`
+	CreatedAt       time.Time         `json:"created_at"`
+	Mode            string            `json:"mode"`
+	Tags            []string          `json:"tags,omitempty"`
+	Labels          map[string]string `json:"labels,omitempty"`
+	CacheKey        string            `json:"cache_key,omitempty"`
+}
+
+type SlicerCommitDeleteResponse struct {
+	CommitID string `json:"commit_id"`
+	Status   string `json:"status"`
+}
+
+type SlicerCommittedVM struct {
+	SlicerCommitVMResponse
+	client *SlicerClient
+}
+
+type SlicerForkVMResponse struct {
+	Hostname      string `json:"hostname"`
+	CommitID      string `json:"commit_id,omitempty"`
+	ChildHostname string `json:"child_hostname"`
+	Status        string `json:"status"`
+	ParentStatus  string `json:"parent_status,omitempty"`
+	ChildStatus   string `json:"child_status,omitempty"`
+	Mode          string `json:"mode"`
+}
+
 // MB converts megabytes to bytes
 func MiB(mb int64) int64 {
 	return mb * 1024 * 1024
