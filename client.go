@@ -1409,3 +1409,192 @@ func (c *SlicerClient) RestoreVMWithOptions(ctx context.Context, hostname string
 
 	return nil
 }
+
+// CommitVM commits a stopped persistent VM disk into an immutable parent.
+func (c *SlicerClient) CommitVM(ctx context.Context, hostname string) (*SlicerCommittedVM, error) {
+	return c.CommitVMWithOptions(ctx, hostname, SlicerCommitVMOptions{})
+}
+
+func (c *SlicerClient) CommitVMWithOptions(ctx context.Context, hostname string, opts SlicerCommitVMOptions) (*SlicerCommittedVM, error) {
+	u, err := url.Parse(c.baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse API URL: %w", err)
+	}
+	u.Path = fmt.Sprintf("/vm/%s/commit", hostname)
+
+	var reqBody io.Reader
+	opts.CacheKey = strings.TrimSpace(opts.CacheKey)
+	if len(opts.Tags) > 0 || len(opts.Labels) > 0 || opts.CacheKey != "" {
+		payload, err := json.Marshal(opts)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal request: %w", err)
+		}
+		reqBody = bytes.NewReader(payload)
+	}
+	req, err := c.newColdForkRequest(ctx, http.MethodPost, u.String(), reqBody)
+	if err != nil {
+		return nil, err
+	}
+	res, body, err := c.doColdForkRequest(req, "commit VM")
+	if err != nil {
+		return nil, err
+	}
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("status %s: %s", res.Status, strings.TrimSpace(string(body)))
+	}
+	var out SlicerCommitVMResponse
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, fmt.Errorf("failed to decode commit response: %w", err)
+	}
+	return &SlicerCommittedVM{SlicerCommitVMResponse: out, client: c}, nil
+}
+
+func (c *SlicerClient) ListCommits(ctx context.Context, opts SlicerCommitListOptions) ([]SlicerCommitInfo, error) {
+	u, err := url.Parse(c.baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse API URL: %w", err)
+	}
+	u.Path = "/vm/commits"
+	q := u.Query()
+	for _, tag := range opts.Tags {
+		if tag = strings.TrimSpace(tag); tag != "" {
+			q.Add("tag", tag)
+		}
+	}
+	if value := strings.TrimSpace(opts.CacheKey); value != "" {
+		q.Set("cache_key", value)
+	}
+	if value := strings.TrimSpace(opts.Source); value != "" {
+		q.Set("source", value)
+	}
+	if value := strings.TrimSpace(opts.Mode); value != "" {
+		q.Set("mode", value)
+	}
+	u.RawQuery = q.Encode()
+	req, err := c.newColdForkRequest(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	res, body, err := c.doColdForkRequest(req, "list VM commits")
+	if err != nil {
+		return nil, err
+	}
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("status %s: %s", res.Status, strings.TrimSpace(string(body)))
+	}
+	var out []SlicerCommitInfo
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, fmt.Errorf("failed to decode commit list response: %w", err)
+	}
+	return out, nil
+}
+
+func (c *SlicerClient) DeleteCommit(ctx context.Context, commitID string) (*SlicerCommitDeleteResponse, error) {
+	u, err := url.Parse(c.baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse API URL: %w", err)
+	}
+	u.Path = fmt.Sprintf("/vm/commits/%s", url.PathEscape(commitID))
+	req, err := c.newColdForkRequest(ctx, http.MethodDelete, u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	res, body, err := c.doColdForkRequest(req, "delete commit")
+	if err != nil {
+		return nil, err
+	}
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("status %s: %s", res.Status, strings.TrimSpace(string(body)))
+	}
+	var out SlicerCommitDeleteResponse
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, fmt.Errorf("failed to decode commit delete response: %w", err)
+	}
+	return &out, nil
+}
+
+func (c *SlicerClient) ForkCommittedVM(ctx context.Context, commitID, childHostname string) (*SlicerForkVMResponse, error) {
+	return c.ForkCommittedVMWithOptions(ctx, commitID, childHostname, SlicerForkVMOptions{})
+}
+
+func (c *SlicerClient) ForkCommittedVMWithOptions(ctx context.Context, commitID, childHostname string, opts SlicerForkVMOptions) (*SlicerForkVMResponse, error) {
+	u, err := url.Parse(c.baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse API URL: %w", err)
+	}
+	u.Path = fmt.Sprintf("/vm/commits/%s/fork", commitID)
+	q := u.Query()
+	q.Set("wait", "agent")
+	if opts.Timeout > 0 {
+		q.Set("timeout", opts.Timeout.String())
+	}
+	u.RawQuery = q.Encode()
+	bodyValue := map[string]any{}
+	if childHostname = strings.TrimSpace(childHostname); childHostname != "" {
+		bodyValue["hostname"] = childHostname
+	}
+	if opts.Network != nil {
+		bodyValue["network"] = opts.Network
+	}
+	var reqBody io.Reader
+	if len(bodyValue) > 0 {
+		payload, err := json.Marshal(bodyValue)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal request: %w", err)
+		}
+		reqBody = bytes.NewReader(payload)
+	}
+	req, err := c.newColdForkRequest(ctx, http.MethodPost, u.String(), reqBody)
+	if err != nil {
+		return nil, err
+	}
+	res, body, err := c.doColdForkRequest(req, "fork VM")
+	if err != nil {
+		return nil, err
+	}
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("status %s: %s", res.Status, strings.TrimSpace(string(body)))
+	}
+	var out SlicerForkVMResponse
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, fmt.Errorf("failed to decode fork response: %w", err)
+	}
+	return &out, nil
+}
+
+func (vm *SlicerCommittedVM) Fork(ctx context.Context, childHostname string, opts SlicerForkVMOptions) (*SlicerForkVMResponse, error) {
+	if vm == nil || vm.client == nil {
+		return nil, fmt.Errorf("committed VM has no client")
+	}
+	return vm.client.ForkCommittedVMWithOptions(ctx, vm.CommitID, childHostname, opts)
+}
+
+func (c *SlicerClient) newColdForkRequest(ctx context.Context, method, endpoint string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, method, endpoint, body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if c.userAgent != "" {
+		req.Header.Set("User-Agent", c.userAgent)
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	return req, nil
+}
+
+func (c *SlicerClient) doColdForkRequest(req *http.Request, operation string) (*http.Response, []byte, error) {
+	res, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to %s: %w", operation, err)
+	}
+	defer res.Body.Close()
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to read %s response: %w", operation, err)
+	}
+	return res, body, nil
+}

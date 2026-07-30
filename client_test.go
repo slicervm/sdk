@@ -8,9 +8,80 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestColdForkClientWorkflow(t *testing.T) {
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.RequestURI())
+		if got := r.Header.Get("Authorization"); got != "Bearer test-token" {
+			t.Errorf("Authorization = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/vm/demo-1/commit":
+			var body SlicerCommitVMOptions
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Error(err)
+			}
+			if body.CacheKey != "cache-v1" || strings.Join(body.Tags, ",") != "base,test" {
+				t.Errorf("commit body = %#v", body)
+			}
+			_, _ = io.WriteString(w, `{"hostname":"demo-1","commit_id":"cmt-demo","status":"committed","parent_status":"stopped","mode":"disk"}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/vm/commits":
+			if r.URL.Query().Get("cache_key") != "cache-v1" || strings.Join(r.URL.Query()["tag"], ",") != "base,test" {
+				t.Errorf("commit list query = %s", r.URL.RawQuery)
+			}
+			_, _ = io.WriteString(w, `[{"commit_id":"cmt-demo","source_hostname":"demo-1","source_host_group":"demo","created_at":"2026-07-29T12:00:00Z","mode":"disk"}]`)
+		case r.Method == http.MethodPost && r.URL.Path == "/vm/commits/cmt-demo/fork":
+			if r.URL.Query().Get("wait") != "agent" || r.URL.Query().Get("timeout") != "45s" {
+				t.Errorf("fork query = %s", r.URL.RawQuery)
+			}
+			body, _ := io.ReadAll(r.Body)
+			if !strings.Contains(string(body), `"hostname":"demo-2"`) || !strings.Contains(string(body), `"allow":[]`) {
+				t.Errorf("fork body = %s", body)
+			}
+			_, _ = io.WriteString(w, `{"hostname":"demo-1","commit_id":"cmt-demo","child_hostname":"demo-2","status":"forked","child_status":"running","mode":"disk"}`)
+		case r.Method == http.MethodDelete && r.URL.Path == "/vm/commits/cmt-demo":
+			_, _ = io.WriteString(w, `{"commit_id":"cmt-demo","status":"deleted"}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := NewSlicerClient(server.URL, "test-token", "sdk-test", nil)
+	committed, err := client.CommitVMWithOptions(context.Background(), "demo-1", SlicerCommitVMOptions{
+		Tags: []string{"base", "test"}, CacheKey: " cache-v1 ",
+	})
+	if err != nil || committed.CommitID != "cmt-demo" {
+		t.Fatalf("commit = %#v, %v", committed, err)
+	}
+	commits, err := client.ListCommits(context.Background(), SlicerCommitListOptions{
+		Tags: []string{"base", "test"}, CacheKey: "cache-v1",
+	})
+	if err != nil || len(commits) != 1 || commits[0].CommitID != "cmt-demo" {
+		t.Fatalf("commits = %#v, %v", commits, err)
+	}
+	emptyAllow := []string{}
+	child, err := committed.Fork(context.Background(), "demo-2", SlicerForkVMOptions{
+		Timeout: 45 * time.Second,
+		Network: &SlicerForkVMNetworkPolicy{Allow: &emptyAllow},
+	})
+	if err != nil || child.ChildHostname != "demo-2" {
+		t.Fatalf("fork = %#v, %v", child, err)
+	}
+	deleted, err := client.DeleteCommit(context.Background(), "cmt-demo")
+	if err != nil || deleted.Status != "deleted" {
+		t.Fatalf("delete = %#v, %v", deleted, err)
+	}
+	if len(requests) != 4 {
+		t.Fatalf("requests = %v", requests)
+	}
+}
 
 func TestNormalizeUnixSocketPath(t *testing.T) {
 	home := t.TempDir()
