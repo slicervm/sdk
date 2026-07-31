@@ -42,8 +42,33 @@ type SlicerCreateNodeRequest struct {
 // SlicerCreateNodeNetworkPolicy optionally overrides the host group's
 // isolated-network allow/drop firewall lists for this VM launch.
 type SlicerCreateNodeNetworkPolicy struct {
-	Allow []string `json:"allow,omitempty"`
-	Drop  []string `json:"drop,omitempty"`
+	Allow *[]string `json:"allow,omitempty"`
+	Drop  *[]string `json:"drop,omitempty"`
+}
+
+// SlicerVMDescription contains the configured and effective state of one VM.
+type SlicerVMDescription struct {
+	SlicerNode
+	Storage        string                     `json:"storage,omitempty"`
+	Image          string                     `json:"image,omitempty"`
+	CommitID       string                     `json:"commit_id,omitempty"`
+	ParentCommitID string                     `json:"parent_commit_id,omitempty"`
+	Network        SlicerVMNetworkDescription `json:"network"`
+}
+
+// SlicerVMNetworkDescription explains policy inheritance for one VM.
+type SlicerVMNetworkDescription struct {
+	Mode      string                         `json:"mode,omitempty"`
+	Source    string                         `json:"policy_source,omitempty"`
+	HostGroup SlicerVMNetworkPolicy          `json:"host_group"`
+	Override  *SlicerCreateNodeNetworkPolicy `json:"override,omitempty"`
+	Effective SlicerVMNetworkPolicy          `json:"effective"`
+}
+
+// SlicerVMNetworkPolicy is a resolved allow/drop policy.
+type SlicerVMNetworkPolicy struct {
+	Allow []string `json:"allow"`
+	Drop  []string `json:"drop"`
 }
 
 // SlicerCreateNodeWaitFor controls how far the server should wait before returning.
