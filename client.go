@@ -1526,11 +1526,15 @@ func (c *SlicerClient) ListCommits(ctx context.Context, opts SlicerCommitListOpt
 }
 
 func (c *SlicerClient) DeleteCommit(ctx context.Context, commitID string) (*SlicerCommitDeleteResponse, error) {
+	commitID, err := validateColdForkCommitID(commitID)
+	if err != nil {
+		return nil, err
+	}
 	u, err := url.Parse(c.baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse API URL: %w", err)
 	}
-	u.Path = fmt.Sprintf("/vm/commits/%s", url.PathEscape(commitID))
+	u.Path = fmt.Sprintf("/vm/commits/%s", commitID)
 	req, err := c.newColdForkRequest(ctx, http.MethodDelete, u.String(), nil)
 	if err != nil {
 		return nil, err
@@ -1554,6 +1558,10 @@ func (c *SlicerClient) ForkCommittedVM(ctx context.Context, commitID, childHostn
 }
 
 func (c *SlicerClient) ForkCommittedVMWithOptions(ctx context.Context, commitID, childHostname string, opts SlicerForkVMOptions) (*SlicerForkVMResponse, error) {
+	commitID, err := validateColdForkCommitID(commitID)
+	if err != nil {
+		return nil, err
+	}
 	u, err := url.Parse(c.baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse API URL: %w", err)
@@ -1596,6 +1604,17 @@ func (c *SlicerClient) ForkCommittedVMWithOptions(ctx context.Context, commitID,
 		return nil, fmt.Errorf("failed to decode fork response: %w", err)
 	}
 	return &out, nil
+}
+
+func validateColdForkCommitID(commitID string) (string, error) {
+	commitID = strings.TrimSpace(commitID)
+	if commitID == "" {
+		return "", fmt.Errorf("commit ID is required")
+	}
+	if commitID == "." || commitID == ".." || strings.Contains(commitID, "..") || strings.ContainsAny(commitID, "/\\\x00") {
+		return "", fmt.Errorf("invalid commit ID %q", commitID)
+	}
+	return commitID, nil
 }
 
 func (vm *SlicerCommittedVM) Fork(ctx context.Context, childHostname string, opts SlicerForkVMOptions) (*SlicerForkVMResponse, error) {
