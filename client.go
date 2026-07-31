@@ -1037,6 +1037,42 @@ func (c *SlicerClient) ListVMs(ctx context.Context, opts ...ListOptions) ([]Slic
 	return nodes, nil
 }
 
+// DescribeVM returns configuration, lineage, and effective network policy for a VM.
+func (c *SlicerClient) DescribeVM(ctx context.Context, hostname string) (*SlicerVMDescription, error) {
+	u, err := url.Parse(c.baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse API URL: %w", err)
+	}
+	u.Path = path.Join(u.Path, "vm", hostname)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	if c.userAgent != "" {
+		req.Header.Set("User-Agent", c.userAgent)
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+
+	res, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to describe VM: %w", err)
+	}
+	defer res.Body.Close()
+	body, _ := io.ReadAll(res.Body)
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("status %s: %s", res.Status, strings.TrimSpace(string(body)))
+	}
+
+	var description SlicerVMDescription
+	if err := json.Unmarshal(body, &description); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+	return &description, nil
+}
+
 // DeleteVM deletes a VM from a host group
 func (c *SlicerClient) DeleteVM(ctx context.Context, groupName, hostname string) (*SlicerDeleteResponse, error) {
 	u, err := url.Parse(c.baseURL)

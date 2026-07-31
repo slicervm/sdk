@@ -339,3 +339,42 @@ func TestCreateVMWithOptions_InvalidWait(t *testing.T) {
 		t.Fatal("Want invalid wait error, got nil")
 	}
 }
+
+func TestCreateVMWithOptions_PreservesExplicitEmptyNetworkList(t *testing.T) {
+	empty := []string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if !strings.Contains(string(body), `"allow":[]`) {
+			t.Fatalf("request body did not preserve explicit empty allow: %s", body)
+		}
+		_, _ = io.WriteString(w, `{"hostname":"vm-1"}`)
+	}))
+	defer server.Close()
+
+	client := NewSlicerClient(server.URL, "", "test-agent", nil)
+	_, err := client.CreateVM(context.Background(), "vm", SlicerCreateNodeRequest{
+		Network: &SlicerCreateNodeNetworkPolicy{Allow: &empty},
+	})
+	if err != nil {
+		t.Fatalf("CreateVM() failed: %v", err)
+	}
+}
+
+func TestDescribeVM(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/vm/vm-1" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		_, _ = io.WriteString(w, `{"hostname":"vm-1","network":{"mode":"isolated","policy_source":"vm","host_group":{"allow":["10.0.0.0/8"],"drop":[]},"override":{"allow":[]},"effective":{"allow":[],"drop":[]}}}`)
+	}))
+	defer server.Close()
+
+	client := NewSlicerClient(server.URL, "", "test-agent", nil)
+	description, err := client.DescribeVM(context.Background(), "vm-1")
+	if err != nil {
+		t.Fatalf("DescribeVM() failed: %v", err)
+	}
+	if description.Hostname != "vm-1" || description.Network.Override == nil || description.Network.Override.Allow == nil || len(*description.Network.Override.Allow) != 0 {
+		t.Fatalf("unexpected description: %#v", description)
+	}
+}
