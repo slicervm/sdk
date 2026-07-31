@@ -1,6 +1,7 @@
 package slicer
 
 import (
+	"encoding/json"
 	"math"
 	"net"
 	"strings"
@@ -42,8 +43,22 @@ type SlicerCreateNodeRequest struct {
 // SlicerCreateNodeNetworkPolicy optionally overrides the host group's
 // isolated-network allow/drop firewall lists for this VM launch.
 type SlicerCreateNodeNetworkPolicy struct {
-	Allow *[]string `json:"allow,omitempty"`
-	Drop  *[]string `json:"drop,omitempty"`
+	Allow []string `json:"allow,omitempty"`
+	Drop  []string `json:"drop,omitempty"`
+}
+
+// MarshalJSON preserves an explicitly empty list while omitting a nil list.
+// This keeps the original slice-based public API while retaining policy
+// inheritance semantics on the wire.
+func (p SlicerCreateNodeNetworkPolicy) MarshalJSON() ([]byte, error) {
+	body := make(map[string]any, 2)
+	if p.Allow != nil {
+		body["allow"] = p.Allow
+	}
+	if p.Drop != nil {
+		body["drop"] = p.Drop
+	}
+	return json.Marshal(body)
 }
 
 // SlicerVMDescription contains the configured and effective state of one VM.

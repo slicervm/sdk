@@ -353,10 +353,20 @@ func TestCreateVMWithOptions_PreservesExplicitEmptyNetworkList(t *testing.T) {
 
 	client := NewSlicerClient(server.URL, "", "test-agent", nil)
 	_, err := client.CreateVM(context.Background(), "vm", SlicerCreateNodeRequest{
-		Network: &SlicerCreateNodeNetworkPolicy{Allow: &empty},
+		Network: &SlicerCreateNodeNetworkPolicy{Allow: empty},
 	})
 	if err != nil {
 		t.Fatalf("CreateVM() failed: %v", err)
+	}
+}
+
+func TestCreateNodeNetworkPolicyOmitsInheritedLists(t *testing.T) {
+	body, err := json.Marshal(SlicerCreateNodeNetworkPolicy{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(body); got != `{}` {
+		t.Fatalf("policy JSON = %s, want {}", got)
 	}
 }
 
@@ -374,7 +384,7 @@ func TestDescribeVM(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DescribeVM() failed: %v", err)
 	}
-	if description.Hostname != "vm-1" || description.Network.Override == nil || description.Network.Override.Allow == nil || len(*description.Network.Override.Allow) != 0 {
+	if description.Hostname != "vm-1" || description.Network.Override == nil || description.Network.Override.Allow == nil || len(description.Network.Override.Allow) != 0 {
 		t.Fatalf("unexpected description: %#v", description)
 	}
 }

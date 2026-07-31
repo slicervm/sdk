@@ -52,7 +52,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("describe: %v", err)
 	}
-	if description.ParentCommitID != commit.CommitID || description.Network.Override == nil || description.Network.Override.Allow == nil || len(*description.Network.Override.Allow) != 0 {
+	if description.ParentCommitID != commit.CommitID || description.Network.Override == nil || description.Network.Override.Allow == nil || len(description.Network.Override.Allow) != 0 {
 		log.Fatalf("unexpected child description: %#v", description)
 	}
 
