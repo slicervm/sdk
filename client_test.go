@@ -83,6 +83,20 @@ func TestColdForkClientWorkflow(t *testing.T) {
 	}
 }
 
+func TestColdForkClientRejectsInvalidCommitIDs(t *testing.T) {
+	client := NewSlicerClient("http://127.0.0.1:8080", "", "sdk-test", nil)
+	for _, commitID := range []string{"", "../commit", "commit/child", `commit\\child`} {
+		t.Run(commitID, func(t *testing.T) {
+			if _, err := client.DeleteCommit(context.Background(), commitID); err == nil {
+				t.Fatal("DeleteCommit accepted an invalid commit ID")
+			}
+			if _, err := client.ForkCommittedVM(context.Background(), commitID, "demo-2"); err == nil {
+				t.Fatal("ForkCommittedVM accepted an invalid commit ID")
+			}
+		})
+	}
+}
+
 func TestNormalizeUnixSocketPath(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
