@@ -128,6 +128,7 @@ type SlicerRestoreVMOptions struct {
 type SlicerForkVMOptions struct {
 	Timeout time.Duration              `json:"-"`
 	Network *SlicerForkVMNetworkPolicy `json:"-"`
+	Tags    []string                   `json:"-"`
 }
 
 // SlicerForkVMNetworkPolicy optionally overrides the host group's isolated
@@ -184,13 +185,13 @@ type SlicerCommittedVM struct {
 }
 
 type SlicerForkVMResponse struct {
-	Hostname      string `json:"hostname"`
-	CommitID      string `json:"commit_id,omitempty"`
-	ChildHostname string `json:"child_hostname"`
-	Status        string `json:"status"`
-	ParentStatus  string `json:"parent_status,omitempty"`
-	ChildStatus   string `json:"child_status,omitempty"`
-	Mode          string `json:"mode"`
+	Hostname       string `json:"hostname"`
+	SourceHostname string `json:"source_hostname"`
+	CommitID       string `json:"commit_id,omitempty"`
+	Status         string `json:"status"`
+	ParentStatus   string `json:"parent_status,omitempty"`
+	ChildStatus    string `json:"child_status,omitempty"`
+	Mode           string `json:"mode"`
 }
 
 // MB converts megabytes to bytes

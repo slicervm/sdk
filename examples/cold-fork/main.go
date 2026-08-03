@@ -12,15 +12,14 @@ import (
 )
 
 func main() {
-	var apiURL, token, source, child, cacheKey string
+	var apiURL, token, source, cacheKey string
 	flag.StringVar(&apiURL, "url", os.Getenv("SLICER_URL"), "Slicer API URL or socket")
 	flag.StringVar(&token, "token", os.Getenv("SLICER_TOKEN"), "Slicer API bearer token")
 	flag.StringVar(&source, "source", "", "stopped persistent source VM")
-	flag.StringVar(&child, "child", "", "child VM hostname")
 	flag.StringVar(&cacheKey, "cache-key", "sdk-cold-fork-example", "commit cache key")
 	flag.Parse()
-	if apiURL == "" || source == "" || child == "" {
-		log.Fatal("--url, --source, and --child are required")
+	if apiURL == "" || source == "" {
+		log.Fatal("--url and --source are required")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -39,16 +38,17 @@ func main() {
 	}
 
 	emptyAllow := []string{}
-	fork, err := commit.Fork(ctx, child, slicer.SlicerForkVMOptions{
+	fork, err := commit.Fork(ctx, slicer.SlicerForkVMOptions{
 		Timeout: 2 * time.Minute,
 		Network: &slicer.SlicerForkVMNetworkPolicy{Allow: &emptyAllow},
+		Tags:    []string{"example=cold-fork"},
 	})
 	if err != nil {
 		log.Fatalf("fork: %v", err)
 	}
-	fmt.Printf("child=%s\n", fork.ChildHostname)
+	fmt.Printf("child=%s\n", fork.Hostname)
 
-	description, err := client.DescribeVM(ctx, fork.ChildHostname)
+	description, err := client.DescribeVM(ctx, fork.Hostname)
 	if err != nil {
 		log.Fatalf("describe: %v", err)
 	}
@@ -56,7 +56,7 @@ func main() {
 		log.Fatalf("unexpected child description: %#v", description)
 	}
 
-	if _, err := client.DeleteVM(ctx, description.HostGroup, fork.ChildHostname); err != nil {
+	if _, err := client.DeleteVM(ctx, description.HostGroup, fork.Hostname); err != nil {
 		log.Fatalf("delete child: %v", err)
 	}
 	if _, err := client.DeleteCommit(ctx, commit.CommitID); err == nil {
