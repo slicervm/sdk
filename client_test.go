@@ -41,10 +41,10 @@ func TestColdForkClientWorkflow(t *testing.T) {
 				t.Errorf("fork query = %s", r.URL.RawQuery)
 			}
 			body, _ := io.ReadAll(r.Body)
-			if !strings.Contains(string(body), `"hostname":"demo-2"`) || !strings.Contains(string(body), `"allow":[]`) {
+			if strings.Contains(string(body), `"hostname"`) || !strings.Contains(string(body), `"allow":[]`) || !strings.Contains(string(body), `"tags":["job=review"]`) {
 				t.Errorf("fork body = %s", body)
 			}
-			_, _ = io.WriteString(w, `{"hostname":"demo-1","commit_id":"cmt-demo","child_hostname":"demo-2","status":"forked","child_status":"running","mode":"disk"}`)
+			_, _ = io.WriteString(w, `{"hostname":"demo-2","source_hostname":"demo-1","commit_id":"cmt-demo","status":"forked","child_status":"running","mode":"disk"}`)
 		case r.Method == http.MethodDelete && r.URL.Path == "/vm/commits/cmt-demo":
 			_, _ = io.WriteString(w, `{"commit_id":"cmt-demo","status":"deleted"}`)
 		default:
@@ -67,11 +67,12 @@ func TestColdForkClientWorkflow(t *testing.T) {
 		t.Fatalf("commits = %#v, %v", commits, err)
 	}
 	emptyAllow := []string{}
-	child, err := committed.Fork(context.Background(), "demo-2", SlicerForkVMOptions{
+	child, err := committed.Fork(context.Background(), SlicerForkVMOptions{
 		Timeout: 45 * time.Second,
 		Network: &SlicerForkVMNetworkPolicy{Allow: &emptyAllow},
+		Tags:    []string{"job=review"},
 	})
-	if err != nil || child.ChildHostname != "demo-2" {
+	if err != nil || child.Hostname != "demo-2" || child.SourceHostname != "demo-1" {
 		t.Fatalf("fork = %#v, %v", child, err)
 	}
 	deleted, err := client.DeleteCommit(context.Background(), "cmt-demo")
@@ -90,7 +91,7 @@ func TestColdForkClientRejectsInvalidCommitIDs(t *testing.T) {
 			if _, err := client.DeleteCommit(context.Background(), commitID); err == nil {
 				t.Fatal("DeleteCommit accepted an invalid commit ID")
 			}
-			if _, err := client.ForkCommittedVM(context.Background(), commitID, "demo-2"); err == nil {
+			if _, err := client.ForkCommittedVM(context.Background(), commitID); err == nil {
 				t.Fatal("ForkCommittedVM accepted an invalid commit ID")
 			}
 		})

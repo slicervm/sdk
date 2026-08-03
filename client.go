@@ -1553,11 +1553,11 @@ func (c *SlicerClient) DeleteCommit(ctx context.Context, commitID string) (*Slic
 	return &out, nil
 }
 
-func (c *SlicerClient) ForkCommittedVM(ctx context.Context, commitID, childHostname string) (*SlicerForkVMResponse, error) {
-	return c.ForkCommittedVMWithOptions(ctx, commitID, childHostname, SlicerForkVMOptions{})
+func (c *SlicerClient) ForkCommittedVM(ctx context.Context, commitID string) (*SlicerForkVMResponse, error) {
+	return c.ForkCommittedVMWithOptions(ctx, commitID, SlicerForkVMOptions{})
 }
 
-func (c *SlicerClient) ForkCommittedVMWithOptions(ctx context.Context, commitID, childHostname string, opts SlicerForkVMOptions) (*SlicerForkVMResponse, error) {
+func (c *SlicerClient) ForkCommittedVMWithOptions(ctx context.Context, commitID string, opts SlicerForkVMOptions) (*SlicerForkVMResponse, error) {
 	commitID, err := validateColdForkCommitID(commitID)
 	if err != nil {
 		return nil, err
@@ -1574,11 +1574,11 @@ func (c *SlicerClient) ForkCommittedVMWithOptions(ctx context.Context, commitID,
 	}
 	u.RawQuery = q.Encode()
 	bodyValue := map[string]any{}
-	if childHostname = strings.TrimSpace(childHostname); childHostname != "" {
-		bodyValue["hostname"] = childHostname
-	}
 	if opts.Network != nil {
 		bodyValue["network"] = opts.Network
+	}
+	if len(opts.Tags) > 0 {
+		bodyValue["tags"] = opts.Tags
 	}
 	var reqBody io.Reader
 	if len(bodyValue) > 0 {
@@ -1617,11 +1617,11 @@ func validateColdForkCommitID(commitID string) (string, error) {
 	return commitID, nil
 }
 
-func (vm *SlicerCommittedVM) Fork(ctx context.Context, childHostname string, opts SlicerForkVMOptions) (*SlicerForkVMResponse, error) {
+func (vm *SlicerCommittedVM) Fork(ctx context.Context, opts SlicerForkVMOptions) (*SlicerForkVMResponse, error) {
 	if vm == nil || vm.client == nil {
 		return nil, fmt.Errorf("committed VM has no client")
 	}
-	return vm.client.ForkCommittedVMWithOptions(ctx, vm.CommitID, childHostname, opts)
+	return vm.client.ForkCommittedVMWithOptions(ctx, vm.CommitID, opts)
 }
 
 func (c *SlicerClient) newColdForkRequest(ctx context.Context, method, endpoint string, body io.Reader) (*http.Request, error) {
