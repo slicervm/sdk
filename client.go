@@ -1572,6 +1572,7 @@ func (c *SlicerClient) ForkCommittedVMWithOptions(ctx context.Context, commitID 
 	case SlicerForkWaitDefault, SlicerForkWaitAgent:
 		q.Set("wait", "agent")
 	case SlicerForkWaitNone:
+		q.Set("wait", "none")
 	default:
 		return nil, fmt.Errorf("invalid fork wait mode %q", opts.Wait)
 	}

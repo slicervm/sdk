@@ -89,10 +89,10 @@ func TestColdForkClientWorkflow(t *testing.T) {
 	}
 }
 
-func TestColdForkClientNoWaitOmitsWaitQuery(t *testing.T) {
+func TestColdForkClientNoWaitUsesExplicitWaitQuery(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Query().Has("wait") {
-			t.Errorf("unexpected wait query: %s", r.URL.RawQuery)
+		if got := r.URL.Query().Get("wait"); got != "none" {
+			t.Errorf("wait = %q, want none", got)
 		}
 		_, _ = io.WriteString(w, `{"hostname":"demo-2","source_hostname":"demo-1","commit_id":"cmt-demo","status":"forked","child_status":"starting","mode":"disk"}`)
 	}))
