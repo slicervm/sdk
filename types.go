@@ -166,59 +166,74 @@ const (
 	SlicerForkFixupSSHHostKeys SlicerForkVMFixup = "ssh-host-keys"
 )
 
-type SlicerForkVMOption func(*SlicerForkVMOptions)
+// SlicerForkVMOption is accepted by SlicerCommittedVM.Fork. The SDK seals the
+// interface so callers get typed options while both the options struct and
+// With... helpers remain valid inputs.
+type SlicerForkVMOption interface {
+	applyFork(*SlicerForkVMOptions)
+}
 
-func WithForkFixups(fixups ...SlicerForkVMFixup) SlicerForkVMOption {
-	return func(options *SlicerForkVMOptions) {
+type slicerForkVMOptionFunc func(*SlicerForkVMOptions)
+
+func (option slicerForkVMOptionFunc) applyFork(options *SlicerForkVMOptions) {
+	option(options)
+}
+
+func (options SlicerForkVMOptions) applyFork(target *SlicerForkVMOptions) {
+	*target = options
+}
+
+func WithFixups(fixups ...SlicerForkVMFixup) SlicerForkVMOption {
+	return slicerForkVMOptionFunc(func(options *SlicerForkVMOptions) {
 		options.Fixups = append([]SlicerForkVMFixup{}, fixups...)
-	}
+	})
 }
 
-func WithForkVCPU(vcpu int) SlicerForkVMOption {
-	return func(options *SlicerForkVMOptions) { options.VCPU = vcpu }
+func WithVCPU(vcpu int) SlicerForkVMOption {
+	return slicerForkVMOptionFunc(func(options *SlicerForkVMOptions) { options.VCPU = vcpu })
 }
 
-func WithForkRAMBytes(ramBytes int64) SlicerForkVMOption {
-	return func(options *SlicerForkVMOptions) { options.RAMBytes = ramBytes }
+func WithRAMBytes(ramBytes int64) SlicerForkVMOption {
+	return slicerForkVMOptionFunc(func(options *SlicerForkVMOptions) { options.RAMBytes = ramBytes })
 }
 
-func WithForkTags(tags ...string) SlicerForkVMOption {
-	return func(options *SlicerForkVMOptions) {
+func WithTags(tags ...string) SlicerForkVMOption {
+	return slicerForkVMOptionFunc(func(options *SlicerForkVMOptions) {
 		options.Tags = append([]string{}, tags...)
-	}
+	})
 }
 
-func WithForkReplaceTags(tags ...string) SlicerForkVMOption {
-	return func(options *SlicerForkVMOptions) {
+func WithReplaceTags(tags ...string) SlicerForkVMOption {
+	return slicerForkVMOptionFunc(func(options *SlicerForkVMOptions) {
 		options.Tags = append([]string{}, tags...)
 		options.TagMode = SlicerForkTagsReplace
-	}
+	})
 }
 
-func WithForkSecrets(secrets ...string) SlicerForkVMOption {
-	return func(options *SlicerForkVMOptions) {
+func WithSecrets(secrets ...string) SlicerForkVMOption {
+	return slicerForkVMOptionFunc(func(options *SlicerForkVMOptions) {
 		options.Secrets = append([]string{}, secrets...)
-	}
+	})
 }
 
-func WithForkPersistent(persistent bool) SlicerForkVMOption {
-	return func(options *SlicerForkVMOptions) { options.Persistent = &persistent }
+func WithPersistent(persistent bool) SlicerForkVMOption {
+	return slicerForkVMOptionFunc(func(options *SlicerForkVMOptions) { options.Persistent = &persistent })
 }
 
-func WithForkEphemeral() SlicerForkVMOption {
-	return WithForkPersistent(false)
+func WithEphemeral() SlicerForkVMOption {
+	return WithPersistent(false)
 }
 
-func WithForkWait(wait SlicerForkVMWaitFor) SlicerForkVMOption {
-	return func(options *SlicerForkVMOptions) { options.Wait = wait }
+func WithWait(wait SlicerForkVMWaitFor) SlicerForkVMOption {
+	return slicerForkVMOptionFunc(func(options *SlicerForkVMOptions) { options.Wait = wait })
 }
 
-func WithForkTimeout(timeout time.Duration) SlicerForkVMOption {
-	return func(options *SlicerForkVMOptions) { options.Timeout = timeout }
+func WithTimeout(timeout time.Duration) SlicerForkVMOption {
+	return slicerForkVMOptionFunc(func(options *SlicerForkVMOptions) { options.Timeout = timeout })
 }
 
-func WithForkNetwork(network *SlicerForkVMNetworkPolicy) SlicerForkVMOption {
-	return func(options *SlicerForkVMOptions) { options.Network = network }
+func WithNetwork(network *SlicerForkVMNetworkPolicy) SlicerForkVMOption {
+	return slicerForkVMOptionFunc(func(options *SlicerForkVMOptions) { options.Network = network })
 }
 
 // SlicerForkVMNetworkPolicy optionally overrides the host group's isolated
