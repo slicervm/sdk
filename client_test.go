@@ -67,15 +67,15 @@ func TestColdForkClientWorkflow(t *testing.T) {
 		t.Fatalf("commits = %#v, %v", commits, err)
 	}
 	emptyAllow := []string{}
-	child, err := committed.ForkWith(context.Background(),
-		WithForkTimeout(45*time.Second),
-		WithForkNetwork(&SlicerForkVMNetworkPolicy{Allow: &emptyAllow}),
-		WithForkReplaceTags("job=review"),
-		WithForkSecrets(),
-		WithForkEphemeral(),
-		WithForkFixups(),
-		WithForkVCPU(1),
-		WithForkRAMBytes(512<<20),
+	child, err := committed.Fork(context.Background(),
+		WithTimeout(45*time.Second),
+		WithNetwork(&SlicerForkVMNetworkPolicy{Allow: &emptyAllow}),
+		WithReplaceTags("job=review"),
+		WithSecrets(),
+		WithEphemeral(),
+		WithFixups(),
+		WithVCPU(1),
+		WithRAMBytes(512<<20),
 	)
 	if err != nil || child.Hostname != "demo-2" || child.SourceHostname != "demo-1" {
 		t.Fatalf("fork = %#v, %v", child, err)
@@ -99,11 +99,41 @@ func TestColdForkClientNoWaitUsesExplicitWaitQuery(t *testing.T) {
 	defer server.Close()
 
 	client := NewSlicerClient(server.URL, "", "sdk-test", nil)
-	if _, err := client.ForkCommittedVMWith(context.Background(), "cmt-demo", WithForkWait(SlicerForkWaitNone)); err != nil {
+	if _, err := client.ForkCommittedVMWith(context.Background(), "cmt-demo", WithWait(SlicerForkWaitNone)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.ForkCommittedVMWith(context.Background(), "cmt-demo", WithForkWait("invalid")); err == nil {
+	if _, err := client.ForkCommittedVMWith(context.Background(), "cmt-demo", WithWait("invalid")); err == nil {
 		t.Fatal("invalid wait mode was accepted")
+	}
+}
+
+func TestCommittedVMForkAcceptsDefaultsAndOptionsStruct(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if got := r.URL.Query().Get("wait"); got != "agent" {
+			t.Errorf("wait = %q, want agent", got)
+		}
+		_, _ = io.WriteString(w, `{"hostname":"demo-2","source_hostname":"demo-1","commit_id":"cmt-demo","status":"forked","child_status":"running","mode":"disk"}`)
+	}))
+	defer server.Close()
+
+	client := NewSlicerClient(server.URL, "", "sdk-test", nil)
+	committed := &SlicerCommittedVM{
+		SlicerCommitVMResponse: SlicerCommitVMResponse{CommitID: "cmt-demo"},
+		client:                 client,
+	}
+	if _, err := committed.Fork(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := committed.Fork(context.Background(), SlicerForkVMOptions{VCPU: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := committed.Fork(context.Background(), WithVCPU(1), WithRAMBytes(512<<20)); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 3 {
+		t.Fatalf("requests = %d, want 3", requests)
 	}
 }
 

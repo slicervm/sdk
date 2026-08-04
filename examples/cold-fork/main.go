@@ -38,11 +38,11 @@ func main() {
 	}
 
 	emptyAllow := []string{}
-	fork, err := commit.Fork(ctx, slicer.SlicerForkVMOptions{
-		Timeout: 2 * time.Minute,
-		Network: &slicer.SlicerForkVMNetworkPolicy{Allow: &emptyAllow},
-		Tags:    []string{"example=cold-fork"},
-	})
+	fork, err := commit.Fork(ctx,
+		slicer.WithTimeout(2*time.Minute),
+		slicer.WithNetwork(&slicer.SlicerForkVMNetworkPolicy{Allow: &emptyAllow}),
+		slicer.WithTags("example=cold-fork"),
+	)
 	if err != nil {
 		log.Fatalf("fork: %v", err)
 	}

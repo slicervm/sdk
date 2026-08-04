@@ -1632,13 +1632,13 @@ func (c *SlicerClient) ForkCommittedVMWithOptions(ctx context.Context, commitID 
 }
 
 // ForkCommittedVMWith applies functional options to a cold fork. Omitting
-// WithForkFixups keeps the server's correctness-first default; passing
-// WithForkFixups() disables all post-clone guest identity fix-ups.
+// WithFixups keeps the server's correctness-first default; passing
+// WithFixups() disables all post-clone guest identity fix-ups.
 func (c *SlicerClient) ForkCommittedVMWith(ctx context.Context, commitID string, options ...SlicerForkVMOption) (*SlicerForkVMResponse, error) {
 	opts := SlicerForkVMOptions{}
 	for _, option := range options {
 		if option != nil {
-			option(&opts)
+			option.applyFork(&opts)
 		}
 	}
 	return c.ForkCommittedVMWithOptions(ctx, commitID, opts)
@@ -1655,18 +1655,19 @@ func validateColdForkCommitID(commitID string) (string, error) {
 	return commitID, nil
 }
 
-func (vm *SlicerCommittedVM) Fork(ctx context.Context, opts SlicerForkVMOptions) (*SlicerForkVMResponse, error) {
-	if vm == nil || vm.client == nil {
-		return nil, fmt.Errorf("committed VM has no client")
-	}
-	return vm.client.ForkCommittedVMWithOptions(ctx, vm.CommitID, opts)
-}
-
-func (vm *SlicerCommittedVM) ForkWith(ctx context.Context, options ...SlicerForkVMOption) (*SlicerForkVMResponse, error) {
+// Fork creates a child using defaults, the existing SlicerForkVMOptions
+// value, or the preferred With... functional options.
+func (vm *SlicerCommittedVM) Fork(ctx context.Context, options ...SlicerForkVMOption) (*SlicerForkVMResponse, error) {
 	if vm == nil || vm.client == nil {
 		return nil, fmt.Errorf("committed VM has no client")
 	}
 	return vm.client.ForkCommittedVMWith(ctx, vm.CommitID, options...)
+}
+
+// ForkWith is retained as an alias for Fork.
+// Deprecated: use Fork.
+func (vm *SlicerCommittedVM) ForkWith(ctx context.Context, options ...SlicerForkVMOption) (*SlicerForkVMResponse, error) {
+	return vm.Fork(ctx, options...)
 }
 
 func (c *SlicerClient) newColdForkRequest(ctx context.Context, method, endpoint string, body io.Reader) (*http.Request, error) {
