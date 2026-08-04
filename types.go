@@ -123,9 +123,7 @@ type SlicerRestoreVMOptions struct {
 	Timeout time.Duration `json:"-"`
 }
 
-// SlicerForkVMOptions controls readiness, resources, guest fix-ups, and
-// isolated networking for a cold fork.
-type SlicerForkVMOptions struct {
+type slicerForkVMOptions struct {
 	Timeout time.Duration              `json:"-"`
 	Wait    SlicerForkVMWaitFor        `json:"-"`
 	Network *SlicerForkVMNetworkPolicy `json:"-"`
@@ -166,74 +164,82 @@ const (
 	SlicerForkFixupSSHHostKeys SlicerForkVMFixup = "ssh-host-keys"
 )
 
-// SlicerForkVMOption is accepted by SlicerCommittedVM.Fork. The SDK seals the
-// interface so callers get typed options while both the options struct and
-// With... helpers remain valid inputs.
+// SlicerForkVMOption configures a committed VM fork.
 type SlicerForkVMOption interface {
-	applyFork(*SlicerForkVMOptions)
+	applyFork(*slicerForkVMOptions)
 }
 
-type slicerForkVMOptionFunc func(*SlicerForkVMOptions)
+type slicerForkVMOptionFunc func(*slicerForkVMOptions)
 
-func (option slicerForkVMOptionFunc) applyFork(options *SlicerForkVMOptions) {
+func (option slicerForkVMOptionFunc) applyFork(options *slicerForkVMOptions) {
 	option(options)
 }
 
-func (options SlicerForkVMOptions) applyFork(target *SlicerForkVMOptions) {
-	*target = options
-}
-
+// WithFixups selects post-clone guest identity fix-ups. Calling it without
+// arguments disables all fix-ups; omitting it keeps the server default.
 func WithFixups(fixups ...SlicerForkVMFixup) SlicerForkVMOption {
-	return slicerForkVMOptionFunc(func(options *SlicerForkVMOptions) {
+	return slicerForkVMOptionFunc(func(options *slicerForkVMOptions) {
 		options.Fixups = append([]SlicerForkVMFixup{}, fixups...)
 	})
 }
 
+// WithVCPU sets the child's vCPU count within the source host-group limit.
 func WithVCPU(vcpu int) SlicerForkVMOption {
-	return slicerForkVMOptionFunc(func(options *SlicerForkVMOptions) { options.VCPU = vcpu })
+	return slicerForkVMOptionFunc(func(options *slicerForkVMOptions) { options.VCPU = vcpu })
 }
 
+// WithRAMBytes sets the child's RAM in bytes within the source host-group limit.
 func WithRAMBytes(ramBytes int64) SlicerForkVMOption {
-	return slicerForkVMOptionFunc(func(options *SlicerForkVMOptions) { options.RAMBytes = ramBytes })
+	return slicerForkVMOptionFunc(func(options *slicerForkVMOptions) { options.RAMBytes = ramBytes })
 }
 
+// WithTags appends tags to those inherited from the committed VM.
 func WithTags(tags ...string) SlicerForkVMOption {
-	return slicerForkVMOptionFunc(func(options *SlicerForkVMOptions) {
+	return slicerForkVMOptionFunc(func(options *slicerForkVMOptions) {
 		options.Tags = append([]string{}, tags...)
 	})
 }
 
+// WithReplaceTags replaces inherited tags. Calling it without arguments clears
+// all inherited tags.
 func WithReplaceTags(tags ...string) SlicerForkVMOption {
-	return slicerForkVMOptionFunc(func(options *SlicerForkVMOptions) {
+	return slicerForkVMOptionFunc(func(options *slicerForkVMOptions) {
 		options.Tags = append([]string{}, tags...)
 		options.TagMode = SlicerForkTagsReplace
 	})
 }
 
+// WithSecrets replaces inherited secret grants. Calling it without arguments
+// clears all inherited grants and blots their files from the child.
 func WithSecrets(secrets ...string) SlicerForkVMOption {
-	return slicerForkVMOptionFunc(func(options *SlicerForkVMOptions) {
+	return slicerForkVMOptionFunc(func(options *slicerForkVMOptions) {
 		options.Secrets = append([]string{}, secrets...)
 	})
 }
 
+// WithPersistent controls whether the child survives shutdown for relaunch.
 func WithPersistent(persistent bool) SlicerForkVMOption {
-	return slicerForkVMOptionFunc(func(options *SlicerForkVMOptions) { options.Persistent = &persistent })
+	return slicerForkVMOptionFunc(func(options *slicerForkVMOptions) { options.Persistent = &persistent })
 }
 
+// WithEphemeral discards the child's cloned storage when it stops or is deleted.
 func WithEphemeral() SlicerForkVMOption {
 	return WithPersistent(false)
 }
 
+// WithWait controls whether the fork waits for agent readiness and finalisation.
 func WithWait(wait SlicerForkVMWaitFor) SlicerForkVMOption {
-	return slicerForkVMOptionFunc(func(options *SlicerForkVMOptions) { options.Wait = wait })
+	return slicerForkVMOptionFunc(func(options *slicerForkVMOptions) { options.Wait = wait })
 }
 
+// WithTimeout sets the readiness and finalisation timeout.
 func WithTimeout(timeout time.Duration) SlicerForkVMOption {
-	return slicerForkVMOptionFunc(func(options *SlicerForkVMOptions) { options.Timeout = timeout })
+	return slicerForkVMOptionFunc(func(options *slicerForkVMOptions) { options.Timeout = timeout })
 }
 
+// WithNetwork overrides the source host group's isolated network policy.
 func WithNetwork(network *SlicerForkVMNetworkPolicy) SlicerForkVMOption {
-	return slicerForkVMOptionFunc(func(options *SlicerForkVMOptions) { options.Network = network })
+	return slicerForkVMOptionFunc(func(options *slicerForkVMOptions) { options.Network = network })
 }
 
 // SlicerForkVMNetworkPolicy optionally overrides the host group's isolated

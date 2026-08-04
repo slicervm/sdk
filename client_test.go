@@ -99,15 +99,15 @@ func TestColdForkClientNoWaitUsesExplicitWaitQuery(t *testing.T) {
 	defer server.Close()
 
 	client := NewSlicerClient(server.URL, "", "sdk-test", nil)
-	if _, err := client.ForkCommittedVMWith(context.Background(), "cmt-demo", WithWait(SlicerForkWaitNone)); err != nil {
+	if _, err := client.ForkCommittedVM(context.Background(), "cmt-demo", WithWait(SlicerForkWaitNone)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.ForkCommittedVMWith(context.Background(), "cmt-demo", WithWait("invalid")); err == nil {
+	if _, err := client.ForkCommittedVM(context.Background(), "cmt-demo", WithWait("invalid")); err == nil {
 		t.Fatal("invalid wait mode was accepted")
 	}
 }
 
-func TestCommittedVMForkAcceptsDefaultsAndOptionsStruct(t *testing.T) {
+func TestCommittedVMForkAcceptsDefaultsAndOptions(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
@@ -126,14 +126,11 @@ func TestCommittedVMForkAcceptsDefaultsAndOptionsStruct(t *testing.T) {
 	if _, err := committed.Fork(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := committed.Fork(context.Background(), SlicerForkVMOptions{VCPU: 1}); err != nil {
-		t.Fatal(err)
-	}
 	if _, err := committed.Fork(context.Background(), WithVCPU(1), WithRAMBytes(512<<20)); err != nil {
 		t.Fatal(err)
 	}
-	if requests != 3 {
-		t.Fatalf("requests = %d, want 3", requests)
+	if requests != 2 {
+		t.Fatalf("requests = %d, want 2", requests)
 	}
 }
 
