@@ -1568,7 +1568,13 @@ func (c *SlicerClient) ForkCommittedVMWithOptions(ctx context.Context, commitID 
 	}
 	u.Path = fmt.Sprintf("/vm/commits/%s/fork", commitID)
 	q := u.Query()
-	q.Set("wait", "agent")
+	switch opts.Wait {
+	case SlicerForkWaitDefault, SlicerForkWaitAgent:
+		q.Set("wait", "agent")
+	case SlicerForkWaitNone:
+	default:
+		return nil, fmt.Errorf("invalid fork wait mode %q", opts.Wait)
+	}
 	if opts.Timeout > 0 {
 		q.Set("timeout", opts.Timeout.String())
 	}
@@ -1577,8 +1583,17 @@ func (c *SlicerClient) ForkCommittedVMWithOptions(ctx context.Context, commitID 
 	if opts.Network != nil {
 		bodyValue["network"] = opts.Network
 	}
-	if len(opts.Tags) > 0 {
+	if opts.Tags != nil {
 		bodyValue["tags"] = opts.Tags
+	}
+	if opts.TagMode != "" {
+		bodyValue["tag_mode"] = opts.TagMode
+	}
+	if opts.Secrets != nil {
+		bodyValue["secrets"] = opts.Secrets
+	}
+	if opts.Persistent != nil {
+		bodyValue["persistent"] = *opts.Persistent
 	}
 	if opts.Fixups != nil {
 		bodyValue["fixups"] = opts.Fixups
