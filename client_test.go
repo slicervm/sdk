@@ -41,7 +41,7 @@ func TestColdForkClientWorkflow(t *testing.T) {
 				t.Errorf("fork query = %s", r.URL.RawQuery)
 			}
 			body, _ := io.ReadAll(r.Body)
-			if strings.Contains(string(body), `"hostname"`) || !strings.Contains(string(body), `"allow":[]`) || !strings.Contains(string(body), `"tags":["job=review"]`) {
+			if strings.Contains(string(body), `"hostname"`) || !strings.Contains(string(body), `"allow":[]`) || !strings.Contains(string(body), `"tags":["job=review"]`) || !strings.Contains(string(body), `"fixups":[]`) || !strings.Contains(string(body), `"vcpu":1`) || !strings.Contains(string(body), `"ram_bytes":536870912`) {
 				t.Errorf("fork body = %s", body)
 			}
 			_, _ = io.WriteString(w, `{"hostname":"demo-2","source_hostname":"demo-1","commit_id":"cmt-demo","status":"forked","child_status":"running","mode":"disk"}`)
@@ -67,11 +67,14 @@ func TestColdForkClientWorkflow(t *testing.T) {
 		t.Fatalf("commits = %#v, %v", commits, err)
 	}
 	emptyAllow := []string{}
-	child, err := committed.Fork(context.Background(), SlicerForkVMOptions{
-		Timeout: 45 * time.Second,
-		Network: &SlicerForkVMNetworkPolicy{Allow: &emptyAllow},
-		Tags:    []string{"job=review"},
-	})
+	child, err := committed.ForkWith(context.Background(),
+		WithForkTimeout(45*time.Second),
+		WithForkNetwork(&SlicerForkVMNetworkPolicy{Allow: &emptyAllow}),
+		WithForkTags("job=review"),
+		WithForkFixups(),
+		WithForkVCPU(1),
+		WithForkRAMBytes(512<<20),
+	)
 	if err != nil || child.Hostname != "demo-2" || child.SourceHostname != "demo-1" {
 		t.Fatalf("fork = %#v, %v", child, err)
 	}
