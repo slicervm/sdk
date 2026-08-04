@@ -127,14 +127,36 @@ type SlicerRestoreVMOptions struct {
 // isolated networking for a cold fork.
 type SlicerForkVMOptions struct {
 	Timeout time.Duration              `json:"-"`
+	Wait    SlicerForkVMWaitFor        `json:"-"`
 	Network *SlicerForkVMNetworkPolicy `json:"-"`
 	Tags    []string                   `json:"-"`
+	TagMode SlicerForkVMTagMode        `json:"-"`
+	Secrets []string                   `json:"-"`
+	// Persistent is nil for the server's current persistent default.
+	Persistent *bool `json:"-"`
 	// Fixups is nil for the correctness-first default. A non-nil empty slice
 	// disables post-clone guest fix-ups.
 	Fixups   []SlicerForkVMFixup `json:"-"`
 	VCPU     int                 `json:"-"`
 	RAMBytes int64               `json:"-"`
 }
+
+type SlicerForkVMWaitFor string
+
+const (
+	// SlicerForkWaitDefault preserves the historical SDK behaviour and waits
+	// for agent readiness and selected guest fix-ups.
+	SlicerForkWaitDefault SlicerForkVMWaitFor = ""
+	SlicerForkWaitNone    SlicerForkVMWaitFor = "none"
+	SlicerForkWaitAgent   SlicerForkVMWaitFor = "agent"
+)
+
+type SlicerForkVMTagMode string
+
+const (
+	SlicerForkTagsAppend  SlicerForkVMTagMode = "append"
+	SlicerForkTagsReplace SlicerForkVMTagMode = "replace"
+)
 
 type SlicerForkVMFixup string
 
@@ -162,8 +184,33 @@ func WithForkRAMBytes(ramBytes int64) SlicerForkVMOption {
 
 func WithForkTags(tags ...string) SlicerForkVMOption {
 	return func(options *SlicerForkVMOptions) {
-		options.Tags = append([]string(nil), tags...)
+		options.Tags = append([]string{}, tags...)
 	}
+}
+
+func WithForkReplaceTags(tags ...string) SlicerForkVMOption {
+	return func(options *SlicerForkVMOptions) {
+		options.Tags = append([]string{}, tags...)
+		options.TagMode = SlicerForkTagsReplace
+	}
+}
+
+func WithForkSecrets(secrets ...string) SlicerForkVMOption {
+	return func(options *SlicerForkVMOptions) {
+		options.Secrets = append([]string{}, secrets...)
+	}
+}
+
+func WithForkPersistent(persistent bool) SlicerForkVMOption {
+	return func(options *SlicerForkVMOptions) { options.Persistent = &persistent }
+}
+
+func WithForkEphemeral() SlicerForkVMOption {
+	return WithForkPersistent(false)
+}
+
+func WithForkWait(wait SlicerForkVMWaitFor) SlicerForkVMOption {
+	return func(options *SlicerForkVMOptions) { options.Wait = wait }
 }
 
 func WithForkTimeout(timeout time.Duration) SlicerForkVMOption {
@@ -235,6 +282,7 @@ type SlicerForkVMResponse struct {
 	ParentStatus   string `json:"parent_status,omitempty"`
 	ChildStatus    string `json:"child_status,omitempty"`
 	Mode           string `json:"mode"`
+	Persistent     bool   `json:"persistent"`
 }
 
 // MB converts megabytes to bytes

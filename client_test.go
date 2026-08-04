@@ -41,7 +41,7 @@ func TestColdForkClientWorkflow(t *testing.T) {
 				t.Errorf("fork query = %s", r.URL.RawQuery)
 			}
 			body, _ := io.ReadAll(r.Body)
-			if strings.Contains(string(body), `"hostname"`) || !strings.Contains(string(body), `"allow":[]`) || !strings.Contains(string(body), `"tags":["job=review"]`) || !strings.Contains(string(body), `"fixups":[]`) || !strings.Contains(string(body), `"vcpu":1`) || !strings.Contains(string(body), `"ram_bytes":536870912`) {
+			if strings.Contains(string(body), `"hostname"`) || !strings.Contains(string(body), `"allow":[]`) || !strings.Contains(string(body), `"tags":["job=review"]`) || !strings.Contains(string(body), `"tag_mode":"replace"`) || !strings.Contains(string(body), `"secrets":[]`) || !strings.Contains(string(body), `"persistent":false`) || !strings.Contains(string(body), `"fixups":[]`) || !strings.Contains(string(body), `"vcpu":1`) || !strings.Contains(string(body), `"ram_bytes":536870912`) {
 				t.Errorf("fork body = %s", body)
 			}
 			_, _ = io.WriteString(w, `{"hostname":"demo-2","source_hostname":"demo-1","commit_id":"cmt-demo","status":"forked","child_status":"running","mode":"disk"}`)
@@ -70,7 +70,9 @@ func TestColdForkClientWorkflow(t *testing.T) {
 	child, err := committed.ForkWith(context.Background(),
 		WithForkTimeout(45*time.Second),
 		WithForkNetwork(&SlicerForkVMNetworkPolicy{Allow: &emptyAllow}),
-		WithForkTags("job=review"),
+		WithForkReplaceTags("job=review"),
+		WithForkSecrets(),
+		WithForkEphemeral(),
 		WithForkFixups(),
 		WithForkVCPU(1),
 		WithForkRAMBytes(512<<20),
@@ -84,6 +86,24 @@ func TestColdForkClientWorkflow(t *testing.T) {
 	}
 	if len(requests) != 4 {
 		t.Fatalf("requests = %v", requests)
+	}
+}
+
+func TestColdForkClientNoWaitOmitsWaitQuery(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Has("wait") {
+			t.Errorf("unexpected wait query: %s", r.URL.RawQuery)
+		}
+		_, _ = io.WriteString(w, `{"hostname":"demo-2","source_hostname":"demo-1","commit_id":"cmt-demo","status":"forked","child_status":"starting","mode":"disk"}`)
+	}))
+	defer server.Close()
+
+	client := NewSlicerClient(server.URL, "", "sdk-test", nil)
+	if _, err := client.ForkCommittedVMWith(context.Background(), "cmt-demo", WithForkWait(SlicerForkWaitNone)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.ForkCommittedVMWith(context.Background(), "cmt-demo", WithForkWait("invalid")); err == nil {
+		t.Fatal("invalid wait mode was accepted")
 	}
 }
 
