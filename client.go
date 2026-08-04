@@ -1553,11 +1553,14 @@ func (c *SlicerClient) DeleteCommit(ctx context.Context, commitID string) (*Slic
 	return &out, nil
 }
 
-func (c *SlicerClient) ForkCommittedVM(ctx context.Context, commitID string) (*SlicerForkVMResponse, error) {
-	return c.ForkCommittedVMWithOptions(ctx, commitID, SlicerForkVMOptions{})
-}
-
-func (c *SlicerClient) ForkCommittedVMWithOptions(ctx context.Context, commitID string, opts SlicerForkVMOptions) (*SlicerForkVMResponse, error) {
+// ForkCommittedVM creates a child using defaults plus any With... options.
+func (c *SlicerClient) ForkCommittedVM(ctx context.Context, commitID string, options ...SlicerForkVMOption) (*SlicerForkVMResponse, error) {
+	opts := slicerForkVMOptions{}
+	for _, option := range options {
+		if option != nil {
+			option.applyFork(&opts)
+		}
+	}
 	commitID, err := validateColdForkCommitID(commitID)
 	if err != nil {
 		return nil, err
@@ -1631,19 +1634,6 @@ func (c *SlicerClient) ForkCommittedVMWithOptions(ctx context.Context, commitID 
 	return &out, nil
 }
 
-// ForkCommittedVMWith applies functional options to a cold fork. Omitting
-// WithFixups keeps the server's correctness-first default; passing
-// WithFixups() disables all post-clone guest identity fix-ups.
-func (c *SlicerClient) ForkCommittedVMWith(ctx context.Context, commitID string, options ...SlicerForkVMOption) (*SlicerForkVMResponse, error) {
-	opts := SlicerForkVMOptions{}
-	for _, option := range options {
-		if option != nil {
-			option.applyFork(&opts)
-		}
-	}
-	return c.ForkCommittedVMWithOptions(ctx, commitID, opts)
-}
-
 func validateColdForkCommitID(commitID string) (string, error) {
 	commitID = strings.TrimSpace(commitID)
 	if commitID == "" {
@@ -1655,19 +1645,12 @@ func validateColdForkCommitID(commitID string) (string, error) {
 	return commitID, nil
 }
 
-// Fork creates a child using defaults, the existing SlicerForkVMOptions
-// value, or the preferred With... functional options.
+// Fork creates a child using defaults plus any With... options.
 func (vm *SlicerCommittedVM) Fork(ctx context.Context, options ...SlicerForkVMOption) (*SlicerForkVMResponse, error) {
 	if vm == nil || vm.client == nil {
 		return nil, fmt.Errorf("committed VM has no client")
 	}
-	return vm.client.ForkCommittedVMWith(ctx, vm.CommitID, options...)
-}
-
-// ForkWith is retained as an alias for Fork.
-// Deprecated: use Fork.
-func (vm *SlicerCommittedVM) ForkWith(ctx context.Context, options ...SlicerForkVMOption) (*SlicerForkVMResponse, error) {
-	return vm.Fork(ctx, options...)
+	return vm.client.ForkCommittedVM(ctx, vm.CommitID, options...)
 }
 
 func (c *SlicerClient) newColdForkRequest(ctx context.Context, method, endpoint string, body io.Reader) (*http.Request, error) {
