@@ -228,6 +228,8 @@ func WithEphemeral() SlicerForkVMOption {
 }
 
 // WithWait controls whether the fork waits for agent readiness and finalisation.
+// A no-wait response acknowledges launch only; the daemon removes the child if
+// requested asynchronous finalisation later fails.
 func WithWait(wait SlicerForkVMWaitFor) SlicerForkVMOption {
 	return slicerForkVMOptionFunc(func(options *slicerForkVMOptions) { options.Wait = wait })
 }
