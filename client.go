@@ -1580,6 +1580,15 @@ func (c *SlicerClient) ForkCommittedVMWithOptions(ctx context.Context, commitID 
 	if len(opts.Tags) > 0 {
 		bodyValue["tags"] = opts.Tags
 	}
+	if opts.Fixups != nil {
+		bodyValue["fixups"] = opts.Fixups
+	}
+	if opts.VCPU != 0 {
+		bodyValue["vcpu"] = opts.VCPU
+	}
+	if opts.RAMBytes != 0 {
+		bodyValue["ram_bytes"] = opts.RAMBytes
+	}
 	var reqBody io.Reader
 	if len(bodyValue) > 0 {
 		payload, err := json.Marshal(bodyValue)
@@ -1606,6 +1615,19 @@ func (c *SlicerClient) ForkCommittedVMWithOptions(ctx context.Context, commitID 
 	return &out, nil
 }
 
+// ForkCommittedVMWith applies functional options to a cold fork. Omitting
+// WithForkFixups keeps the server's correctness-first default; passing
+// WithForkFixups() disables all post-clone guest identity fix-ups.
+func (c *SlicerClient) ForkCommittedVMWith(ctx context.Context, commitID string, options ...SlicerForkVMOption) (*SlicerForkVMResponse, error) {
+	opts := SlicerForkVMOptions{}
+	for _, option := range options {
+		if option != nil {
+			option(&opts)
+		}
+	}
+	return c.ForkCommittedVMWithOptions(ctx, commitID, opts)
+}
+
 func validateColdForkCommitID(commitID string) (string, error) {
 	commitID = strings.TrimSpace(commitID)
 	if commitID == "" {
@@ -1622,6 +1644,13 @@ func (vm *SlicerCommittedVM) Fork(ctx context.Context, opts SlicerForkVMOptions)
 		return nil, fmt.Errorf("committed VM has no client")
 	}
 	return vm.client.ForkCommittedVMWithOptions(ctx, vm.CommitID, opts)
+}
+
+func (vm *SlicerCommittedVM) ForkWith(ctx context.Context, options ...SlicerForkVMOption) (*SlicerForkVMResponse, error) {
+	if vm == nil || vm.client == nil {
+		return nil, fmt.Errorf("committed VM has no client")
+	}
+	return vm.client.ForkCommittedVMWith(ctx, vm.CommitID, options...)
 }
 
 func (c *SlicerClient) newColdForkRequest(ctx context.Context, method, endpoint string, body io.Reader) (*http.Request, error) {

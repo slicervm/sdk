@@ -123,12 +123,55 @@ type SlicerRestoreVMOptions struct {
 	Timeout time.Duration `json:"-"`
 }
 
-// SlicerForkVMOptions controls readiness and isolated networking for a cold
-// fork. Fork always waits for the child agent to finalise guest identity.
+// SlicerForkVMOptions controls readiness, resources, guest fix-ups, and
+// isolated networking for a cold fork.
 type SlicerForkVMOptions struct {
 	Timeout time.Duration              `json:"-"`
 	Network *SlicerForkVMNetworkPolicy `json:"-"`
 	Tags    []string                   `json:"-"`
+	// Fixups is nil for the correctness-first default. A non-nil empty slice
+	// disables post-clone guest fix-ups.
+	Fixups   []SlicerForkVMFixup `json:"-"`
+	VCPU     int                 `json:"-"`
+	RAMBytes int64               `json:"-"`
+}
+
+type SlicerForkVMFixup string
+
+const (
+	SlicerForkFixupHostname    SlicerForkVMFixup = "hostname"
+	SlicerForkFixupMachineID   SlicerForkVMFixup = "machine-id"
+	SlicerForkFixupSSHHostKeys SlicerForkVMFixup = "ssh-host-keys"
+)
+
+type SlicerForkVMOption func(*SlicerForkVMOptions)
+
+func WithForkFixups(fixups ...SlicerForkVMFixup) SlicerForkVMOption {
+	return func(options *SlicerForkVMOptions) {
+		options.Fixups = append([]SlicerForkVMFixup{}, fixups...)
+	}
+}
+
+func WithForkVCPU(vcpu int) SlicerForkVMOption {
+	return func(options *SlicerForkVMOptions) { options.VCPU = vcpu }
+}
+
+func WithForkRAMBytes(ramBytes int64) SlicerForkVMOption {
+	return func(options *SlicerForkVMOptions) { options.RAMBytes = ramBytes }
+}
+
+func WithForkTags(tags ...string) SlicerForkVMOption {
+	return func(options *SlicerForkVMOptions) {
+		options.Tags = append([]string(nil), tags...)
+	}
+}
+
+func WithForkTimeout(timeout time.Duration) SlicerForkVMOption {
+	return func(options *SlicerForkVMOptions) { options.Timeout = timeout }
+}
+
+func WithForkNetwork(network *SlicerForkVMNetworkPolicy) SlicerForkVMOption {
+	return func(options *SlicerForkVMOptions) { options.Network = network }
 }
 
 // SlicerForkVMNetworkPolicy optionally overrides the host group's isolated
