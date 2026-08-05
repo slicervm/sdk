@@ -103,6 +103,9 @@ func (c *SlicerClient) CpToVMChunked(ctx context.Context, vmName, localPath, vmP
 	if !supported {
 		return ErrChunkedCopyUnsupported
 	}
+	if manifestVersion < ChunkedCopyManifestV2 {
+		return fmt.Errorf("%w: guest agent does not support cp-v1 chunk placement", ErrChunkedCopyUnsupported)
+	}
 
 	absSrc, err := filepath.Abs(localPath)
 	if err != nil {
@@ -148,12 +151,10 @@ func (c *SlicerClient) CpToVMChunked(ctx context.Context, vmName, localPath, vmP
 		UnpackedSize: source.unpackedSize,
 		Chunks:       []CopyChunk{},
 	}
-	if manifestVersion >= ChunkedCopyManifestV2 {
-		manifest.CopySemantics = cpCopySemanticsV1
-		manifest.SourceName = metadata.name
-		manifest.SourceType = metadata.typeName
-		manifest.CopyContents = metadata.copyContents
-	}
+	manifest.CopySemantics = cpCopySemanticsV1
+	manifest.SourceName = metadata.name
+	manifest.SourceType = metadata.typeName
+	manifest.CopyContents = metadata.copyContents
 	for offset := int64(0); offset < source.size; offset += int64(opts.ChunkSize) {
 		size := int64(opts.ChunkSize)
 		if remaining := source.size - offset; remaining < size {

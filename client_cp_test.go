@@ -135,7 +135,7 @@ func TestLocalCopySourceMetadataTreatsRootAsContents(t *testing.T) {
 	}
 }
 
-func TestLocalCopySourceMetadataRejectsSymlink(t *testing.T) {
+func TestLocalCopySourceMetadataFollowsBinaryFileSymlink(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "target")
 	if err := os.WriteFile(target, []byte("data"), 0o600); err != nil {
@@ -145,8 +145,15 @@ func TestLocalCopySourceMetadataRejectsSymlink(t *testing.T) {
 	if err := os.Symlink(target, link); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := localCopySourceMetadata(link, link, "binary"); err == nil || !strings.Contains(err.Error(), "symbolic link") {
-		t.Fatalf("error = %v", err)
+	metadata, err := localCopySourceMetadata(link, link, "binary")
+	if err != nil {
+		t.Fatalf("localCopySourceMetadata: %v", err)
+	}
+	if metadata.name != "link" || metadata.typeName != copySourceTypeFile {
+		t.Fatalf("metadata = %+v", metadata)
+	}
+	if _, err := localCopySourceMetadata(link, link, "tar"); err == nil || !strings.Contains(err.Error(), "symbolic link") {
+		t.Fatalf("tar error = %v", err)
 	}
 }
 
