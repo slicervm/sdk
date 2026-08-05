@@ -175,7 +175,7 @@ func TestCpFromVMBinaryShapesExistingDirectory(t *testing.T) {
 			t.Errorf("copy_semantics = %q", got)
 		}
 		w.Header().Set(copySourceTypeHeader, copySourceTypeFile)
-		w.Header().Set(copySourceNameHeader, "tool")
+		w.Header().Set(copySourceNameHeader, encodeCopySourceName("tool"))
 		_, _ = io.WriteString(w, "contents")
 	}))
 	defer server.Close()
@@ -193,6 +193,42 @@ func TestCpFromVMBinaryShapesExistingDirectory(t *testing.T) {
 	}
 	if requests != 1 {
 		t.Fatalf("requests = %d, want 1", requests)
+	}
+}
+
+func TestCopyMetadataPreservesSourceNameWhitespace(t *testing.T) {
+	for _, name := range []string{" report.txt", "report.txt "} {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set(copySourceTypeHeader, copySourceTypeFile)
+				w.Header().Set(copySourceNameHeader, encodeCopySourceName(name))
+			}))
+			defer server.Close()
+
+			res, err := server.Client().Get(server.URL)
+			if err != nil {
+				t.Fatalf("GET metadata: %v", err)
+			}
+			defer res.Body.Close()
+
+			metadata, err := copyMetadataFromResponse(res, false)
+			if err != nil {
+				t.Fatalf("copyMetadataFromResponse: %v", err)
+			}
+			if metadata.name != name {
+				t.Fatalf("source name = %q, want %q", metadata.name, name)
+			}
+		})
+	}
+}
+
+func TestCopyMetadataRejectsLegacyRawSourceName(t *testing.T) {
+	res := &http.Response{Header: make(http.Header)}
+	res.Header.Set(copySourceTypeHeader, copySourceTypeFile)
+	res.Header.Set("X-Slicer-Source-Name", "tool")
+
+	if _, err := copyMetadataFromResponse(res, false); err == nil || !strings.Contains(err.Error(), "incomplete copy metadata") {
+		t.Fatalf("copyMetadataFromResponse error = %v", err)
 	}
 }
 
@@ -234,7 +270,7 @@ func TestCpFromVMRecursiveDispatchesRegularFile(t *testing.T) {
 			t.Errorf("mode = %q", got)
 		}
 		w.Header().Set(copySourceTypeHeader, copySourceTypeFile)
-		w.Header().Set(copySourceNameHeader, "notes.txt")
+		w.Header().Set(copySourceNameHeader, encodeCopySourceName("notes.txt"))
 		_, _ = io.WriteString(w, "notes")
 	}))
 	defer server.Close()
@@ -255,7 +291,7 @@ func TestCpFromVMRecursiveDispatchesRegularFile(t *testing.T) {
 func TestCpFromVMTarRejectsRegularFileMetadata(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set(copySourceTypeHeader, copySourceTypeFile)
-		w.Header().Set(copySourceNameHeader, "notes.txt")
+		w.Header().Set(copySourceNameHeader, encodeCopySourceName("notes.txt"))
 		_, _ = io.WriteString(w, "notes")
 	}))
 	defer server.Close()
@@ -298,7 +334,7 @@ func TestCpFromVMTarShapesDirectoryAndContents(t *testing.T) {
 			archive := makeArchive(t)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set(copySourceTypeHeader, copySourceTypeDir)
-				w.Header().Set(copySourceNameHeader, "project")
+				w.Header().Set(copySourceNameHeader, encodeCopySourceName("project"))
 				_, _ = w.Write(archive)
 			}))
 			defer server.Close()

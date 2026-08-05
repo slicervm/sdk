@@ -18,6 +18,36 @@ import (
 	"time"
 )
 
+func TestSupportsChunkedCopyRequiresV2(t *testing.T) {
+	tests := []struct {
+		name   string
+		stdout string
+		want   bool
+	}{
+		{name: "v1", stdout: "chunked-copy-v1\n", want: false},
+		{name: "v2", stdout: "chunked-copy-v2\n", want: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{"exit_code": 0, "stdout": test.stdout})
+			}))
+			defer server.Close()
+
+			client := NewSlicerClient(server.URL, "", "test", server.Client())
+			got, err := client.SupportsChunkedCopy(context.Background(), "vm-1")
+			if err != nil {
+				t.Fatalf("SupportsChunkedCopy: %v", err)
+			}
+			if got != test.want {
+				t.Fatalf("SupportsChunkedCopy = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
 func TestCpToVMChunkedUploadsManifestAndOrderedChunks(t *testing.T) {
 	var mu sync.Mutex
 	uploads := map[string][]byte{}

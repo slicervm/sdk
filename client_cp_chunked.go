@@ -49,8 +49,8 @@ func (c *byteCounter) Write(p []byte) (int, error) {
 // SupportsChunkedCopy reports whether the guest agent provides the upload
 // finaliser required by CpToVMChunked.
 func (c *SlicerClient) SupportsChunkedCopy(ctx context.Context, vmName string) (bool, error) {
-	_, supported, err := c.chunkedCopyManifestVersion(ctx, vmName)
-	return supported, err
+	version, supported, err := c.chunkedCopyManifestVersion(ctx, vmName)
+	return supported && version >= ChunkedCopyManifestV2, err
 }
 
 func (c *SlicerClient) chunkedCopyManifestVersion(ctx context.Context, vmName string) (int, bool, error) {
