@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // StreamTarArchive streams a tar archive of regular files and directories to w.
@@ -264,10 +265,16 @@ func ExtractTarStream(ctx context.Context, r io.Reader, extractDir string, uid, 
 	if err != nil {
 		return fmt.Errorf("failed to get absolute path of extract directory: %w", err)
 	}
+	root, err := os.OpenRoot(absExtractDir)
+	if err != nil {
+		return fmt.Errorf("failed to open extract directory: %w", err)
+	}
+	defer root.Close()
 	absExtractDir = filepath.Clean(absExtractDir) + string(filepath.Separator)
 
 	tr := tar.NewReader(r)
 	madeDir := make(map[string]bool)
+	directoryTimes := make(map[string]time.Time)
 
 	for {
 		select {
@@ -317,70 +324,99 @@ func ExtractTarStream(ctx context.Context, r io.Reader, extractDir string, uid, 
 
 		switch header.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(target, mode); err != nil {
+			if err := root.MkdirAll(rel, mode); err != nil {
 				return fmt.Errorf("failed to create directory %s: %w", target, err)
 			}
-			madeDir[target] = true
-			// Set ownership if requested (only on Linux, skipped on Windows)
-			// Note: We don't validate uid/gid ranges - the OS will reject invalid values
-			if uid > 0 || gid > 0 {
-				os.Chown(target, int(uid), int(gid)) // Error ignored for Windows compatibility
+			madeDir[rel] = true
+			dir, err := root.Open(rel)
+			if err != nil {
+				return fmt.Errorf("failed to open directory %s: %w", target, err)
 			}
-			// Preserve mtime
+			if err := dir.Chmod(mode); err != nil {
+				_ = dir.Close()
+				return fmt.Errorf("failed to set directory permissions %s: %w", target, err)
+			}
+			if uid > 0 || gid > 0 {
+				_ = dir.Chown(int(uid), int(gid))
+			}
 			if !header.ModTime.IsZero() {
-				os.Chtimes(target, header.ModTime, header.ModTime)
+				directoryTimes[rel] = header.ModTime
+			}
+			if err := dir.Close(); err != nil {
+				return fmt.Errorf("failed to close directory %s: %w", target, err)
 			}
 
 		case tar.TypeReg, tar.TypeRegA:
 			// Create parent directories
-			parentDir := filepath.Dir(target)
-			if !madeDir[parentDir] {
-				if err := os.MkdirAll(parentDir, 0o755); err != nil {
+			parentRel := filepath.Dir(rel)
+			if !madeDir[parentRel] {
+				if err := root.MkdirAll(parentRel, 0o755); err != nil {
 					return fmt.Errorf("failed to create parent directory for %s: %w", target, err)
 				}
-				madeDir[parentDir] = true
+				madeDir[parentRel] = true
 			}
 
 			// Remove existing file if it exists
-			os.Remove(target)
+			if err := root.Remove(rel); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("failed to replace file %s: %w", target, err)
+			}
 
 			// Create and write file
-			f, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR|os.O_TRUNC, mode)
+			f, err := root.OpenFile(rel, os.O_CREATE|os.O_RDWR|os.O_TRUNC, mode)
 			if err != nil {
 				return fmt.Errorf("failed to create file %s: %w", target, err)
 			}
 
 			n, err := io.Copy(f, tr)
-			closeErr := f.Close()
 			if err != nil {
+				_ = f.Close()
 				return fmt.Errorf("failed to write file %s: %w", target, err)
 			}
-			if closeErr != nil {
-				return fmt.Errorf("failed to close file %s: %w", target, closeErr)
-			}
 			if header.Size > 0 && n != header.Size {
+				_ = f.Close()
 				return fmt.Errorf("only wrote %d bytes to %s; expected %d", n, target, header.Size)
 			}
 
 			// Set permissions (in case umask modified them)
 			// Note: Permissions are already set when opening the file, this ensures umask didn't modify them
-			os.Chmod(target, mode)
+			if err := f.Chmod(mode); err != nil {
+				_ = f.Close()
+				return fmt.Errorf("failed to set file permissions %s: %w", target, err)
+			}
 
 			// Set ownership if requested (only on Linux, skipped on Windows)
 			// Note: We only chown if explicitly requested (uid/gid != 0) to avoid overhead on large archives
 			// Note: We don't validate uid/gid ranges - the OS will reject invalid values
 			if uid > 0 || gid > 0 {
-				os.Chown(target, int(uid), int(gid)) // Error ignored for Windows compatibility
+				_ = f.Chown(int(uid), int(gid))
 			}
-
-			// Preserve mtime
 			if !header.ModTime.IsZero() {
-				os.Chtimes(target, header.ModTime, header.ModTime)
+				if err := setOpenFileTimes(f, root, rel, header.ModTime); err != nil {
+					_ = f.Close()
+					return fmt.Errorf("failed to set file times %s: %w", target, err)
+				}
+			}
+			if err := f.Close(); err != nil {
+				return fmt.Errorf("failed to close file %s: %w", target, err)
 			}
 
 		default:
 			// Skip unsupported types (symlinks, hard links, devices, etc.)
 			continue
+		}
+	}
+
+	for rel, modified := range directoryTimes {
+		dir, err := root.Open(rel)
+		if err != nil {
+			return fmt.Errorf("failed to reopen directory %s: %w", rel, err)
+		}
+		if err := setOpenFileTimes(dir, root, rel, modified); err != nil {
+			_ = dir.Close()
+			return fmt.Errorf("failed to set directory times %s: %w", rel, err)
+		}
+		if err := dir.Close(); err != nil {
+			return fmt.Errorf("failed to close directory %s: %w", rel, err)
 		}
 	}
 
@@ -393,8 +429,20 @@ func ExtractTarStream(ctx context.Context, r io.Reader, extractDir string, uid, 
 // Since tar paths use forward slashes as separators (via filepath.ToSlash()), any backslashes
 // in the path are part of the filename, not path separators.
 func ValidRelPath(p string) bool {
-	if p == "" || strings.HasPrefix(p, "/") || strings.Contains(p, "../") {
+	if p == "" || strings.HasPrefix(p, "/") {
 		return false
+	}
+	if filepath.Separator == '\\' && strings.Contains(p, `\`) {
+		return false
+	}
+	normalized := filepath.ToSlash(p)
+	if path.Clean(normalized) != normalized {
+		return false
+	}
+	for _, component := range strings.Split(normalized, "/") {
+		if component == "" || component == "." || component == ".." {
+			return false
+		}
 	}
 	// Backslashes are allowed because they're part of filenames, not path separators.
 	// Path separators are already normalized to forward slashes during archive creation.

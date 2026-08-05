@@ -49,6 +49,11 @@ func (c *byteCounter) Write(p []byte) (int, error) {
 // SupportsChunkedCopy reports whether the guest agent provides the upload
 // finaliser required by CpToVMChunked.
 func (c *SlicerClient) SupportsChunkedCopy(ctx context.Context, vmName string) (bool, error) {
+	_, supported, err := c.chunkedCopyManifestVersion(ctx, vmName)
+	return supported, err
+}
+
+func (c *SlicerClient) chunkedCopyManifestVersion(ctx context.Context, vmName string) (int, bool, error) {
 	result, err := c.ExecBuffered(ctx, vmName, SlicerExecRequest{
 		Command: slicerAgentPath,
 		Args:    []string{"upload", "check"},
@@ -58,9 +63,17 @@ func (c *SlicerClient) SupportsChunkedCopy(ctx context.Context, vmName string) (
 		Stderr:  true,
 	})
 	if err != nil {
-		return false, err
+		return 0, false, err
 	}
-	return result.ExitCode == 0, nil
+	if result.ExitCode != 0 {
+		return 0, false, nil
+	}
+	for _, field := range strings.Fields(result.Stdout) {
+		if field == "chunked-copy-v2" {
+			return ChunkedCopyManifestV2, true, nil
+		}
+	}
+	return ChunkedCopyManifestVersion, true, nil
 }
 
 // CpToVMChunked copies a file or staged tar stream in bounded, checksummed
@@ -83,7 +96,7 @@ func (c *SlicerClient) CpToVMChunked(ctx context.Context, vmName, localPath, vmP
 		return fmt.Errorf("invalid mode: %s", opts.Mode)
 	}
 
-	supported, err := c.SupportsChunkedCopy(ctx, vmName)
+	manifestVersion, supported, err := c.chunkedCopyManifestVersion(ctx, vmName)
 	if err != nil {
 		return fmt.Errorf("check guest chunked-copy support: %w", err)
 	}
@@ -94,6 +107,10 @@ func (c *SlicerClient) CpToVMChunked(ctx context.Context, vmName, localPath, vmP
 	absSrc, err := filepath.Abs(localPath)
 	if err != nil {
 		return fmt.Errorf("get absolute source path: %w", err)
+	}
+	metadata, err := localCopySourceMetadata(localPath, absSrc, opts.Mode)
+	if err != nil {
+		return err
 	}
 	sessionID, err := newCopySessionID()
 	if err != nil {
@@ -122,7 +139,7 @@ func (c *SlicerClient) CpToVMChunked(ctx context.Context, vmName, localPath, vmP
 	}()
 
 	manifest := CopyManifest{
-		Version:      ChunkedCopyManifestVersion,
+		Version:      manifestVersion,
 		Mode:         opts.Mode,
 		Destination:  vmPath,
 		UID:          opts.UID,
@@ -130,6 +147,12 @@ func (c *SlicerClient) CpToVMChunked(ctx context.Context, vmName, localPath, vmP
 		Permissions:  opts.Permissions,
 		UnpackedSize: source.unpackedSize,
 		Chunks:       []CopyChunk{},
+	}
+	if manifestVersion >= ChunkedCopyManifestV2 {
+		manifest.CopySemantics = cpCopySemanticsV1
+		manifest.SourceName = metadata.name
+		manifest.SourceType = metadata.typeName
+		manifest.CopyContents = metadata.copyContents
 	}
 	for offset := int64(0); offset < source.size; offset += int64(opts.ChunkSize) {
 		size := int64(opts.ChunkSize)
@@ -349,9 +372,12 @@ func prepareChunkedCopySource(ctx context.Context, absSrc string, opts ChunkedCo
 	if err != nil {
 		return preparedCopySource{}, fmt.Errorf("estimate tar size: %w", err)
 	}
-	staged, err := os.CreateTemp(parentDir, ".slicer-upload-*.tar")
+	// Keep the staged archive outside the source tree. Staging beside the
+	// source makes a root/contents copy capable of archiving its own growing
+	// tar file, and unnecessarily requires the source parent to be writable.
+	staged, err := os.CreateTemp("", ".slicer-upload-*.tar")
 	if err != nil {
-		return preparedCopySource{}, fmt.Errorf("create staged tar beside source: %w", err)
+		return preparedCopySource{}, fmt.Errorf("create staged tar: %w", err)
 	}
 	removeStaged := func() {
 		_ = staged.Close()

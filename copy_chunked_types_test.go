@@ -1,6 +1,7 @@
 package slicer
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -33,6 +34,38 @@ func TestCopyManifestValidate(t *testing.T) {
 	badSize.Size++
 	if err := badSize.Validate(); err == nil {
 		t.Fatal("incorrect stream size was accepted")
+	}
+}
+
+func TestCopyManifestV2AllowsUnnamedContentsSource(t *testing.T) {
+	manifest := CopyManifest{
+		Version:       ChunkedCopyManifestV2,
+		Mode:          "tar",
+		Destination:   "/tmp/root",
+		CopySemantics: cpCopySemanticsV1,
+		SourceType:    copySourceTypeDir,
+		CopyContents:  true,
+		Chunks:        []CopyChunk{},
+	}
+	if err := manifest.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
+func TestCopyManifestV1OmitsV2Fields(t *testing.T) {
+	data, err := json.Marshal(CopyManifest{
+		Version:     ChunkedCopyManifestVersion,
+		Mode:        "binary",
+		Destination: "/tmp/file",
+		Chunks:      []CopyChunk{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"copy_semantics", "source_name", "source_type", "copy_contents"} {
+		if strings.Contains(string(data), `"`+field+`"`) {
+			t.Fatalf("v1 manifest contains %s: %s", field, data)
+		}
 	}
 }
 
