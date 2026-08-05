@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -136,6 +137,39 @@ func TestCpToVMChunkedUploadsManifestAndOrderedChunks(t *testing.T) {
 	}
 }
 
+func TestCpToVMChunkedRequiresV2PlacementSupport(t *testing.T) {
+	cpRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/exec"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"exit_code":0,"stdout":"chunked-copy-v1\n"}`)
+		case strings.HasSuffix(r.URL.Path, "/cp"):
+			cpRequests++
+			w.WriteHeader(http.StatusOK)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	source := filepath.Join(t.TempDir(), "tool")
+	if err := os.WriteFile(source, []byte("contents"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client := NewSlicerClient(server.URL, "", "test", server.Client())
+	err := client.CpToVMChunked(context.Background(), "vm-1", source, "/existing", ChunkedCopyOptions{
+		Mode:      "binary",
+		ChunkSize: 4,
+	})
+	if !errors.Is(err, ErrChunkedCopyUnsupported) {
+		t.Fatalf("error = %v, want ErrChunkedCopyUnsupported", err)
+	}
+	if cpRequests != 0 {
+		t.Fatalf("copy requests = %d, want 0", cpRequests)
+	}
+}
+
 func TestPrepareChunkedTarStagesOutsideSourceAndCleansUp(t *testing.T) {
 	root := t.TempDir()
 	source := filepath.Join(root, "workspace")
@@ -207,7 +241,7 @@ func TestCpToVMChunkedAbortsFailedUpload(t *testing.T) {
 			execCalls = append(execCalls, append([]string(nil), r.URL.Query()["args"]...))
 			mu.Unlock()
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, `{"exit_code":0}`)
+			_, _ = io.WriteString(w, `{"exit_code":0,"stdout":"chunked-copy-v2\n"}`)
 		case strings.HasSuffix(r.URL.Path, "/cp"):
 			http.Error(w, "request is too large", http.StatusRequestEntityTooLarge)
 		default:
@@ -249,7 +283,7 @@ func TestCpToVMChunkedCancellationAbortsWithoutManifest(t *testing.T) {
 			execCalls = append(execCalls, append([]string(nil), r.URL.Query()["args"]...))
 			mu.Unlock()
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, `{"exit_code":0}`)
+			_, _ = io.WriteString(w, `{"exit_code":0,"stdout":"chunked-copy-v2\n"}`)
 		case strings.HasSuffix(r.URL.Path, "/cp"):
 			if path.Base(r.URL.Query().Get("path")) == "manifest.json" {
 				mu.Lock()
@@ -314,7 +348,7 @@ func TestCpToVMChunkedCleansStagedTarAfterFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasSuffix(r.URL.Path, "/exec") {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, `{"exit_code":0}`)
+			_, _ = io.WriteString(w, `{"exit_code":0,"stdout":"chunked-copy-v2\n"}`)
 			return
 		}
 		http.Error(w, "failed", http.StatusBadGateway)

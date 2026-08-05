@@ -53,7 +53,13 @@ func localCopySourceMetadata(localPath, absSrc, mode string) (copySourceMetadata
 		return copySourceMetadata{}, fmt.Errorf("source does not exist: %w", err)
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		return copySourceMetadata{}, fmt.Errorf("source must not be a symbolic link: %s", localPath)
+		if mode != "binary" {
+			return copySourceMetadata{}, fmt.Errorf("source must not be a symbolic link: %s", localPath)
+		}
+		info, err = os.Stat(absSrc)
+		if err != nil {
+			return copySourceMetadata{}, fmt.Errorf("failed to resolve source symbolic link: %w", err)
+		}
 	}
 	metadata := copySourceMetadata{
 		name:         filepath.Base(absSrc),
