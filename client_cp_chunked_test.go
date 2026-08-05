@@ -33,7 +33,7 @@ func TestCpToVMChunkedUploadsManifestAndOrderedChunks(t *testing.T) {
 			execCalls = append(execCalls, append([]string(nil), r.URL.Query()["args"]...))
 			mu.Unlock()
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, `{"exit_code":0}`)
+			_, _ = io.WriteString(w, `{"exit_code":0,"stdout":"chunked-copy-v2\n"}`)
 		case strings.HasSuffix(r.URL.Path, "/cp"):
 			uploadPath := r.URL.Query().Get("path")
 			isManifest := path.Base(uploadPath) == "manifest.json"
@@ -102,6 +102,13 @@ func TestCpToVMChunkedUploadsManifestAndOrderedChunks(t *testing.T) {
 	if manifest.Destination != "/home/ubuntu/bin/tool" || manifest.Size != int64(len(contents)) || len(manifest.Chunks) != 3 {
 		t.Fatalf("manifest = %+v", manifest)
 	}
+	if manifest.UID != 1000 || manifest.GID != 1000 {
+		t.Fatalf("manifest ownership = %d:%d, want 1000:1000", manifest.UID, manifest.GID)
+	}
+	if manifest.Version != ChunkedCopyManifestV2 || manifest.CopySemantics != cpCopySemanticsV1 ||
+		manifest.SourceName != "tool" || manifest.SourceType != copySourceTypeFile || manifest.CopyContents {
+		t.Fatalf("copy semantics manifest = %+v", manifest)
+	}
 	var assembled []byte
 	for _, chunk := range manifest.Chunks {
 		chunkPath := path.Join(path.Dir(manifestPath), "chunks", CopyChunkFileName(chunk))
@@ -129,7 +136,7 @@ func TestCpToVMChunkedUploadsManifestAndOrderedChunks(t *testing.T) {
 	}
 }
 
-func TestPrepareChunkedTarStagesBesideSourceAndCleansUp(t *testing.T) {
+func TestPrepareChunkedTarStagesOutsideSourceAndCleansUp(t *testing.T) {
 	root := t.TempDir()
 	source := filepath.Join(root, "workspace")
 	if err := os.MkdirAll(source, 0o755); err != nil {
@@ -143,8 +150,8 @@ func TestPrepareChunkedTarStagesBesideSourceAndCleansUp(t *testing.T) {
 		t.Fatalf("prepareChunkedCopySource: %v", err)
 	}
 	stagedPath := prepared.file.Name()
-	if filepath.Dir(stagedPath) != root {
-		t.Fatalf("staged tar directory = %s, want %s", filepath.Dir(stagedPath), root)
+	if strings.HasPrefix(stagedPath, root+string(filepath.Separator)) {
+		t.Fatalf("staged tar %s is inside source tree %s", stagedPath, root)
 	}
 	if prepared.size == 0 || prepared.unpackedSize == 0 {
 		t.Fatalf("staged sizes = %d, %d", prepared.size, prepared.unpackedSize)

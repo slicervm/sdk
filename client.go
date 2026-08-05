@@ -838,7 +838,8 @@ func (c *SlicerClient) ExecBuffered(ctx context.Context, nodeName string, execRe
 // CpToVM copies files from a local path to a VM path.
 // The localPath can be a file or directory. The tar stream is created
 // internally and sent to the VM.
-// uid and gid specify the ownership for extracted files (0 means use default).
+// uid and gid specify ownership. NonRootUser selects the guest's default user;
+// zero explicitly selects root.
 func (c *SlicerClient) CpToVM(ctx context.Context, vmName, localPath, vmPath string, uid, gid uint32, permissions, mode string, excludePatterns ...string) error {
 	// Get absolute path to handle symlinks correctly
 	absSrc, err := filepath.Abs(localPath)
@@ -846,20 +847,22 @@ func (c *SlicerClient) CpToVM(ctx context.Context, vmName, localPath, vmPath str
 		return fmt.Errorf("failed to get absolute path: %w", err)
 	}
 
-	// Check if source exists
-	if _, err := os.Stat(absSrc); err != nil {
-		return fmt.Errorf("source does not exist: %w", err)
+	// Send the source identity to the guest so destination resolution can
+	// happen atomically with the copy.
+	metadata, err := localCopySourceMetadata(localPath, absSrc, mode)
+	if err != nil {
+		return err
 	}
 
 	switch mode {
 	default:
 		return fmt.Errorf("invalid mode: %s", mode)
 	case "tar":
-		if err := copyToVMTar(ctx, c, absSrc, vmName, vmPath, uid, gid, permissions, excludePatterns...); err != nil {
+		if err := copyToVMTar(ctx, c, absSrc, vmName, vmPath, metadata, uid, gid, permissions, excludePatterns...); err != nil {
 			return err
 		}
 	case "binary":
-		if err := copyToVMBinary(ctx, c, absSrc, vmName, vmPath, uid, gid, permissions); err != nil {
+		if err := copyToVMBinary(ctx, c, absSrc, vmName, vmPath, metadata, uid, gid, permissions); err != nil {
 			return err
 		}
 	}
@@ -878,7 +881,9 @@ func (c *SlicerClient) CpFromVM(ctx context.Context, vmName, vmPath, localPath s
 	default:
 		return fmt.Errorf("invalid mode: %s", mode)
 	case "tar":
-		return copyFromVMTar(ctx, c, vmName, vmPath, localPath, excludePatterns...)
+		return copyFromVMTar(ctx, c, vmName, vmPath, localPath, permissions, false, excludePatterns...)
+	case "recursive":
+		return copyFromVMTar(ctx, c, vmName, vmPath, localPath, permissions, true, excludePatterns...)
 	case "binary":
 		return copyFromVMBinary(ctx, c, vmName, vmPath, localPath, permissions)
 	}

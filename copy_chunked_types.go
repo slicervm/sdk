@@ -7,6 +7,7 @@ import (
 
 const (
 	ChunkedCopyManifestVersion = 1
+	ChunkedCopyManifestV2      = 2
 	DefaultCopyChunkSize       = 64 << 20
 	DefaultCopyConcurrency     = 4
 )
@@ -22,15 +23,19 @@ type CopyChunk struct {
 // The format is deliberately small so it can be implemented consistently by
 // the Go, TypeScript, and Python SDKs.
 type CopyManifest struct {
-	Version      int         `json:"version"`
-	Mode         string      `json:"mode"`
-	Destination  string      `json:"destination"`
-	UID          uint32      `json:"uid"`
-	GID          uint32      `json:"gid"`
-	Permissions  string      `json:"permissions,omitempty"`
-	Size         int64       `json:"size"`
-	UnpackedSize int64       `json:"unpacked_size,omitempty"`
-	Chunks       []CopyChunk `json:"chunks"`
+	Version       int         `json:"version"`
+	Mode          string      `json:"mode"`
+	Destination   string      `json:"destination"`
+	UID           uint32      `json:"uid"`
+	GID           uint32      `json:"gid"`
+	Permissions   string      `json:"permissions,omitempty"`
+	Size          int64       `json:"size"`
+	UnpackedSize  int64       `json:"unpacked_size,omitempty"`
+	CopySemantics string      `json:"copy_semantics,omitempty"`
+	SourceName    string      `json:"source_name,omitempty"`
+	SourceType    string      `json:"source_type,omitempty"`
+	CopyContents  bool        `json:"copy_contents,omitempty"`
+	Chunks        []CopyChunk `json:"chunks"`
 }
 
 // ChunkedCopyOptions controls a host-to-VM chunked copy.
@@ -51,8 +56,25 @@ func CopyChunkFileName(chunk CopyChunk) string {
 
 // Validate checks the portable manifest independently of any filesystem.
 func (m CopyManifest) Validate() error {
-	if m.Version != ChunkedCopyManifestVersion {
+	if m.Version != ChunkedCopyManifestVersion && m.Version != ChunkedCopyManifestV2 {
 		return fmt.Errorf("unsupported copy manifest version: %d", m.Version)
+	}
+	if m.Version == ChunkedCopyManifestV2 {
+		if m.CopySemantics != cpCopySemanticsV1 {
+			return fmt.Errorf("invalid copy semantics: %q", m.CopySemantics)
+		}
+		if m.SourceType != copySourceTypeFile && m.SourceType != copySourceTypeDir {
+			return fmt.Errorf("invalid copy source type: %q", m.SourceType)
+		}
+		if !m.CopyContents && !validCopySourceName(m.SourceName) {
+			return fmt.Errorf("invalid copy source name: %q", m.SourceName)
+		}
+		if m.SourceType == copySourceTypeFile && (m.Mode != "binary" || m.CopyContents) {
+			return fmt.Errorf("file copy semantics require binary mode without copy_contents")
+		}
+		if m.SourceType == copySourceTypeDir && m.Mode != "tar" {
+			return fmt.Errorf("directory copy semantics require tar mode")
+		}
 	}
 	if m.Mode != "binary" && m.Mode != "tar" {
 		return fmt.Errorf("invalid copy mode: %q", m.Mode)
