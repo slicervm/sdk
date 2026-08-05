@@ -2,6 +2,7 @@ package slicer
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -25,7 +26,7 @@ const (
 	copySourceTypeFile    = "file"
 	copySourceTypeDir     = "directory"
 	copySourceTypeHeader  = "X-Slicer-Source-Type"
-	copySourceNameHeader  = "X-Slicer-Source-Name"
+	copySourceNameHeader  = "X-Slicer-Source-Name-Base64"
 )
 
 type copySourceMetadata struct {
@@ -456,12 +457,20 @@ func writeBinaryCopyResponse(res *http.Response, localPath, permissions string, 
 
 func copyMetadataFromResponse(res *http.Response, copyContents bool) (*copySourceMetadata, error) {
 	typeName := strings.TrimSpace(res.Header.Get(copySourceTypeHeader))
-	name := strings.TrimSpace(res.Header.Get(copySourceNameHeader))
-	if typeName == "" && name == "" {
+	encodedName := res.Header.Get(copySourceNameHeader)
+	if typeName == "" && encodedName == "" {
 		return nil, nil
 	}
-	if typeName == "" || (name == "" && !copyContents) {
+	if typeName == "" || (encodedName == "" && !copyContents) {
 		return nil, fmt.Errorf("incomplete copy metadata returned by server")
+	}
+	name := ""
+	if encodedName != "" {
+		decoded, err := base64.RawURLEncoding.DecodeString(encodedName)
+		if err != nil {
+			return nil, fmt.Errorf("invalid encoded source name returned by server: %w", err)
+		}
+		name = string(decoded)
 	}
 	if typeName != copySourceTypeFile && typeName != copySourceTypeDir {
 		return nil, fmt.Errorf("invalid source type returned by server: %q", typeName)
@@ -470,6 +479,10 @@ func copyMetadataFromResponse(res *http.Response, copyContents bool) (*copySourc
 		return nil, fmt.Errorf("invalid source name returned by server: %q", name)
 	}
 	return &copySourceMetadata{name: name, typeName: typeName, copyContents: copyContents}, nil
+}
+
+func encodeCopySourceName(name string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(name))
 }
 
 func validCopySourceName(name string) bool {
