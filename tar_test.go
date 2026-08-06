@@ -244,6 +244,91 @@ func TestExtractTarStreamAllowsSymlinkedExtractionRoot(t *testing.T) {
 	}
 }
 
+func TestExtractTarStreamAtomicallyReplacesConcurrentSymlink(t *testing.T) {
+	extractDir := t.TempDir()
+	destination := filepath.Join(extractDir, "file.txt")
+	if err := os.WriteFile(destination, []byte("old"), 0o600); err != nil {
+		t.Fatalf("write old destination: %v", err)
+	}
+	victim := filepath.Join(extractDir, "victim.txt")
+	if err := os.WriteFile(victim, []byte("victim"), 0o600); err != nil {
+		t.Fatalf("write victim: %v", err)
+	}
+
+	contents := []byte("replacement")
+	var archive bytes.Buffer
+	tw := tar.NewWriter(&archive)
+	if err := tw.WriteHeader(&tar.Header{Name: "file.txt", Mode: 0o600, Size: int64(len(contents)), Typeflag: tar.TypeReg}); err != nil {
+		t.Fatalf("write tar header: %v", err)
+	}
+	if _, err := tw.Write(contents); err != nil {
+		t.Fatalf("write tar contents: %v", err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatalf("close tar: %v", err)
+	}
+
+	r := &tarPayloadHookReader{
+		reader: bytes.NewReader(archive.Bytes()),
+		hook: func() error {
+			if err := os.Remove(destination); err != nil {
+				return err
+			}
+			return os.Symlink("victim.txt", destination)
+		},
+	}
+	if err := ExtractTarStream(context.Background(), r, extractDir, 0, 0); err != nil {
+		t.Fatalf("ExtractTarStream() error = %v", err)
+	}
+	if !r.triggered {
+		t.Fatal("payload hook was not triggered")
+	}
+	info, err := os.Lstat(destination)
+	if err != nil {
+		t.Fatalf("lstat destination: %v", err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("destination symlink was followed or left in place")
+	}
+	got, err := os.ReadFile(destination)
+	if err != nil {
+		t.Fatalf("read destination: %v", err)
+	}
+	if string(got) != string(contents) {
+		t.Fatalf("destination contents = %q, want %q", got, contents)
+	}
+	gotVictim, err := os.ReadFile(victim)
+	if err != nil {
+		t.Fatalf("read victim: %v", err)
+	}
+	if string(gotVictim) != "victim" {
+		t.Fatalf("victim contents = %q, want unchanged", gotVictim)
+	}
+}
+
+type tarPayloadHookReader struct {
+	reader    *bytes.Reader
+	hook      func() error
+	offset    int64
+	triggered bool
+}
+
+func (r *tarPayloadHookReader) Read(p []byte) (int, error) {
+	const tarBlockSize = 512
+	if r.offset >= tarBlockSize && !r.triggered {
+		r.triggered = true
+		if err := r.hook(); err != nil {
+			return 0, err
+		}
+	}
+	if remaining := tarBlockSize - r.offset; remaining > 0 && int64(len(p)) > remaining {
+		p = p[:remaining]
+	}
+	n, err := r.reader.Read(p)
+	r.offset += int64(n)
+	return n, err
+}
+
 func TestExtractTarStreamPreservesModificationTimes(t *testing.T) {
 	extractDir := t.TempDir()
 	modified := time.Unix(1_700_000_000, 0).UTC()
