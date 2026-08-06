@@ -3,6 +3,7 @@ package slicer
 import (
 	"archive/tar"
 	"context"
+	"crypto/rand"
 	"fmt"
 	"io"
 	"os"
@@ -356,48 +357,8 @@ func ExtractTarStream(ctx context.Context, r io.Reader, extractDir string, uid, 
 				madeDir[parentRel] = true
 			}
 
-			// Remove existing file if it exists
-			if err := root.Remove(rel); err != nil && !os.IsNotExist(err) {
-				return fmt.Errorf("failed to replace file %s: %w", target, err)
-			}
-
-			// Create and write file
-			f, err := root.OpenFile(rel, os.O_CREATE|os.O_RDWR|os.O_TRUNC, mode)
-			if err != nil {
-				return fmt.Errorf("failed to create file %s: %w", target, err)
-			}
-
-			n, err := io.Copy(f, tr)
-			if err != nil {
-				_ = f.Close()
-				return fmt.Errorf("failed to write file %s: %w", target, err)
-			}
-			if header.Size > 0 && n != header.Size {
-				_ = f.Close()
-				return fmt.Errorf("only wrote %d bytes to %s; expected %d", n, target, header.Size)
-			}
-
-			// Set permissions (in case umask modified them)
-			// Note: Permissions are already set when opening the file, this ensures umask didn't modify them
-			if err := f.Chmod(mode); err != nil {
-				_ = f.Close()
-				return fmt.Errorf("failed to set file permissions %s: %w", target, err)
-			}
-
-			// Set ownership if requested (only on Linux, skipped on Windows)
-			// Note: We only chown if explicitly requested (uid/gid != 0) to avoid overhead on large archives
-			// Note: We don't validate uid/gid ranges - the OS will reject invalid values
-			if uid > 0 || gid > 0 {
-				_ = f.Chown(int(uid), int(gid))
-			}
-			if !header.ModTime.IsZero() {
-				if err := setOpenFileTimes(f, root, rel, header.ModTime); err != nil {
-					_ = f.Close()
-					return fmt.Errorf("failed to set file times %s: %w", target, err)
-				}
-			}
-			if err := f.Close(); err != nil {
-				return fmt.Errorf("failed to close file %s: %w", target, err)
+			if err := extractTarRegularFile(tr, root, rel, target, header, mode, uid, gid); err != nil {
+				return err
 			}
 
 		default:
@@ -421,6 +382,77 @@ func ExtractTarStream(ctx context.Context, r io.Reader, extractDir string, uid, 
 	}
 
 	return nil
+}
+
+func extractTarRegularFile(r io.Reader, root *os.Root, rel, target string, header *tar.Header, mode os.FileMode, uid, gid uint32) (retErr error) {
+	parent, err := root.OpenRoot(filepath.Dir(rel))
+	if err != nil {
+		return fmt.Errorf("failed to open parent directory for %s: %w", target, err)
+	}
+	defer func() {
+		if err := parent.Close(); retErr == nil && err != nil {
+			retErr = fmt.Errorf("failed to close parent directory for %s: %w", target, err)
+		}
+	}()
+
+	f, tempName, err := createTarTempFile(parent)
+	if err != nil {
+		return fmt.Errorf("failed to create temporary file for %s: %w", target, err)
+	}
+	installed := false
+	defer func() {
+		if !installed {
+			_ = parent.Remove(tempName)
+		}
+	}()
+
+	n, err := io.Copy(f, r)
+	if err != nil {
+		_ = f.Close()
+		return fmt.Errorf("failed to write file %s: %w", target, err)
+	}
+	if header.Size > 0 && n != header.Size {
+		_ = f.Close()
+		return fmt.Errorf("only wrote %d bytes to %s; expected %d", n, target, header.Size)
+	}
+	if err := f.Chmod(mode); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("failed to set file permissions %s: %w", target, err)
+	}
+	if uid > 0 || gid > 0 {
+		_ = f.Chown(int(uid), int(gid))
+	}
+	if !header.ModTime.IsZero() {
+		if err := setOpenFileTimes(f, parent, tempName, header.ModTime); err != nil {
+			_ = f.Close()
+			return fmt.Errorf("failed to set file times %s: %w", target, err)
+		}
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("failed to close file %s: %w", target, err)
+	}
+	if err := parent.Rename(tempName, filepath.Base(rel)); err != nil {
+		return fmt.Errorf("failed to install file %s: %w", target, err)
+	}
+	installed = true
+
+	return nil
+}
+
+func createTarTempFile(parent *os.Root) (*os.File, string, error) {
+	for range 100 {
+		var suffix [16]byte
+		if _, err := rand.Read(suffix[:]); err != nil {
+			return nil, "", err
+		}
+		name := fmt.Sprintf(".slicer-extract-%x", suffix)
+		f, err := parent.OpenFile(name, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0o600)
+		if os.IsExist(err) {
+			continue
+		}
+		return f, name, err
+	}
+	return nil, "", fmt.Errorf("failed to allocate a unique temporary filename")
 }
 
 // ValidRelPath validates that a path is a valid relative path
