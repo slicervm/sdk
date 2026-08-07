@@ -341,9 +341,12 @@ func copyFromVMTar(ctx context.Context, c *SlicerClient, vmName, vmPath, localPa
 		if err != nil {
 			return nil, fmt.Errorf("failed to create request: %w", err)
 		}
-		if v1 && recursive {
+		switch {
+		case v1 && recursive:
 			req.Header.Set("Accept", "application/octet-stream, application/x-tar")
-		} else {
+		case wireMode == "binary":
+			req.Header.Set("Accept", "application/octet-stream")
+		default:
 			req.Header.Set("Accept", "application/x-tar")
 		}
 		c.setAuthHeaders(req)
