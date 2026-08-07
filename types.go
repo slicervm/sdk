@@ -24,6 +24,20 @@ type SlicerNode struct {
 	Persistent bool      `json:"persistent,omitempty"`
 }
 
+// SlicerVMTags is the mutable metadata tag state for a VM.
+type SlicerVMTags struct {
+	Hostname string   `json:"hostname"`
+	Tags     []string `json:"tags"`
+}
+
+// SlicerVMTagUpdate describes an atomic VM tag update. Replace cannot be
+// combined with Add or Remove.
+type SlicerVMTagUpdate struct {
+	Add     []string  `json:"add,omitempty"`
+	Remove  []string  `json:"remove,omitempty"`
+	Replace *[]string `json:"replace,omitempty"`
+}
+
 // SlicerCreateNodeRequest contains parameters for creating a node
 type SlicerCreateNodeRequest struct {
 	RamBytes   int64                          `json:"ram_bytes,omitempty"` // RAM size in bytes (must not exceed host group limit)
