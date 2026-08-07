@@ -149,6 +149,9 @@ func copyToVMBinary(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
+	req.GetBody = func() (io.ReadCloser, error) {
+		return os.Open(absSrc)
+	}
 
 	req.Header.Set("Content-Type", "application/octet-stream")
 	c.setAuthHeaders(req)
@@ -184,15 +187,19 @@ func copyToVMTar(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath st
 		return fmt.Errorf("failed to estimate tar unpacked size: %w", err)
 	}
 
-	pr, pw := io.Pipe()
-	defer pr.Close()
+	newTarBody := func() io.ReadCloser {
+		pr, pw := io.Pipe()
+		go func() {
+			defer pw.Close()
+			if err := StreamTarArchive(ctx, pw, parentDir, baseName, excludePatterns...); err != nil {
+				_ = pw.CloseWithError(fmt.Errorf("failed to stream tar: %w", err))
+			}
+		}()
+		return pr
+	}
 
-	go func() {
-		defer pw.Close()
-		if err := StreamTarArchive(ctx, pw, parentDir, baseName, excludePatterns...); err != nil {
-			pw.CloseWithError(fmt.Errorf("failed to stream tar: %w", err))
-		}
-	}()
+	pr := newTarBody()
+	defer pr.Close()
 
 	q := url.Values{}
 	q.Set("path", vmPath)
@@ -226,6 +233,9 @@ func copyToVMTar(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath st
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), pr)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.GetBody = func() (io.ReadCloser, error) {
+		return newTarBody(), nil
 	}
 
 	req.Header.Set("Content-Type", "application/x-tar")
