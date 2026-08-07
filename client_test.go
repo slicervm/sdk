@@ -455,6 +455,19 @@ func TestDescribeVM(t *testing.T) {
 	}
 }
 
+func TestDescribeVMReturnsAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "VM not found", http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	client := NewSlicerClient(server.URL, "", "test-agent", nil)
+	_, err := client.DescribeVM(context.Background(), "missing")
+	if !IsAPIStatus(err, http.StatusNotFound) {
+		t.Fatalf("expected a 404 API error, got %v", err)
+	}
+}
+
 func TestVMTags(t *testing.T) {
 	requests := []struct {
 		method string

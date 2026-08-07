@@ -1068,7 +1068,7 @@ func (c *SlicerClient) DescribeVM(ctx context.Context, hostname string) (*Slicer
 	defer res.Body.Close()
 	body, _ := io.ReadAll(res.Body)
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("status %s: %s", res.Status, strings.TrimSpace(string(body)))
+		return nil, newAPIError(res, body)
 	}
 
 	var description SlicerVMDescription
