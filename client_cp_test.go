@@ -95,6 +95,57 @@ func TestCpToVMSendsCopySemanticsInSingleRequest(t *testing.T) {
 	}
 }
 
+func TestCpToVMRequestBodyCanBeReplayed(t *testing.T) {
+	for _, mode := range []string{"binary", "tar"} {
+		t.Run(mode, func(t *testing.T) {
+			source := filepath.Join(t.TempDir(), "source")
+			if mode == "tar" {
+				if err := os.Mkdir(source, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(source, "file"), []byte("data"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.WriteFile(source, []byte("data"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			transport := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				if req.GetBody == nil {
+					t.Fatal("upload request has no GetBody function")
+				}
+				original, err := io.ReadAll(req.Body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				replayed, err := req.GetBody()
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer replayed.Close()
+				copyBody, err := io.ReadAll(replayed)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(original, copyBody) {
+					t.Fatal("replayed upload body differs from the original")
+				}
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Status:     "200 OK",
+					Header:     make(http.Header),
+					Body:       io.NopCloser(strings.NewReader("")),
+					Request:    req,
+				}, nil
+			})
+			client := NewSlicerClient("http://slicer.invalid", "", "test", &http.Client{Transport: transport})
+			if err := client.CpToVM(t.Context(), "vm-1", source, "/tmp/destination", NonRootUser, NonRootUser, "", mode); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestCpToVMZeroOwnershipMeansRoot(t *testing.T) {
 	for _, mode := range []string{"binary", "tar"} {
 		t.Run(mode, func(t *testing.T) {
