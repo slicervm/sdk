@@ -1078,6 +1078,77 @@ func (c *SlicerClient) DescribeVM(ctx context.Context, hostname string) (*Slicer
 	return &description, nil
 }
 
+// GetVMTags returns the metadata tags assigned to a VM.
+func (c *SlicerClient) GetVMTags(ctx context.Context, hostname string) (*SlicerVMTags, error) {
+	return c.updateVMTags(ctx, http.MethodGet, hostname, nil)
+}
+
+// UpdateVMTags applies an atomic add, remove, or replace operation to a VM's
+// metadata tags.
+func (c *SlicerClient) UpdateVMTags(ctx context.Context, hostname string, update SlicerVMTagUpdate) (*SlicerVMTags, error) {
+	return c.updateVMTags(ctx, http.MethodPatch, hostname, update)
+}
+
+// AddVMTags adds metadata tags to a VM.
+func (c *SlicerClient) AddVMTags(ctx context.Context, hostname string, tags ...string) (*SlicerVMTags, error) {
+	return c.UpdateVMTags(ctx, hostname, SlicerVMTagUpdate{Add: tags})
+}
+
+// RemoveVMTags removes metadata tags from a VM.
+func (c *SlicerClient) RemoveVMTags(ctx context.Context, hostname string, tags ...string) (*SlicerVMTags, error) {
+	return c.UpdateVMTags(ctx, hostname, SlicerVMTagUpdate{Remove: tags})
+}
+
+// ReplaceVMTags replaces a VM's mutable metadata tags.
+func (c *SlicerClient) ReplaceVMTags(ctx context.Context, hostname string, tags ...string) (*SlicerVMTags, error) {
+	replacement := append([]string{}, tags...)
+	return c.UpdateVMTags(ctx, hostname, SlicerVMTagUpdate{Replace: &replacement})
+}
+
+func (c *SlicerClient) updateVMTags(ctx context.Context, method, hostname string, body any) (*SlicerVMTags, error) {
+	u, err := url.Parse(c.baseURL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse API URL: %w", err)
+	}
+	u.Path = path.Join(u.Path, "vm", hostname, "tags")
+
+	var reader io.Reader
+	if body != nil {
+		payload, err := json.Marshal(body)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode VM tag update: %w", err)
+		}
+		reader = bytes.NewReader(payload)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), reader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create VM tag request: %w", err)
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if c.userAgent != "" {
+		req.Header.Set("User-Agent", c.userAgent)
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	res, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update VM tags: %w", err)
+	}
+	defer res.Body.Close()
+	responseBody, _ := io.ReadAll(res.Body)
+	if res.StatusCode < http.StatusOK || res.StatusCode >= http.StatusMultipleChoices {
+		return nil, newAPIError(res, responseBody)
+	}
+	var result SlicerVMTags
+	if err := json.Unmarshal(responseBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to decode VM tags response: %w", err)
+	}
+	return &result, nil
+}
+
 // DeleteVM deletes a VM from a host group
 func (c *SlicerClient) DeleteVM(ctx context.Context, groupName, hostname string) (*SlicerDeleteResponse, error) {
 	u, err := url.Parse(c.baseURL)

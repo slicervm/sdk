@@ -3,6 +3,7 @@ package slicer
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -451,5 +452,74 @@ func TestDescribeVM(t *testing.T) {
 	}
 	if description.Hostname != "vm-1" || description.Network.Override == nil || description.Network.Override.Allow == nil || len(description.Network.Override.Allow) != 0 {
 		t.Fatalf("unexpected description: %#v", description)
+	}
+}
+
+func TestVMTags(t *testing.T) {
+	requests := []struct {
+		method string
+		body   string
+	}{
+		{method: http.MethodGet},
+		{method: http.MethodPatch, body: `{"add":["role=builder"]}`},
+		{method: http.MethodPatch, body: `{"remove":["old"]}`},
+		{method: http.MethodPatch, body: `{"replace":[]}`},
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if len(requests) == 0 {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		want := requests[0]
+		requests = requests[1:]
+		if r.Method != want.method || r.URL.Path != "/vm/vm-1/tags" {
+			t.Fatalf("request = %s %s, want %s /vm/vm-1/tags", r.Method, r.URL.Path, want.method)
+		}
+		body, _ := io.ReadAll(r.Body)
+		if string(body) != want.body {
+			t.Fatalf("body = %s, want %s", body, want.body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"hostname":"vm-1","tags":["name=builder","role=builder"]}`)
+	}))
+	defer server.Close()
+
+	client := NewSlicerClient(server.URL, "", "test-agent", nil)
+	if _, err := client.GetVMTags(context.Background(), "vm-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.AddVMTags(context.Background(), "vm-1", "role=builder"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.RemoveVMTags(context.Background(), "vm-1", "old"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.ReplaceVMTags(context.Background(), "vm-1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(requests) != 0 {
+		t.Fatalf("%d requests were not made", len(requests))
+	}
+}
+
+func TestVMTagsReturnsAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "VM not found", http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	client := NewSlicerClient(server.URL, "", "test-agent", nil)
+	_, err := client.GetVMTags(context.Background(), "missing")
+	if err == nil {
+		t.Fatal("expected an API error")
+	}
+	if !IsAPIStatus(err, http.StatusNotFound) {
+		t.Fatalf("expected a 404 API error, got %v", err)
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("expected *APIError, got %T", err)
+	}
+	if apiErr.Method != http.MethodGet || apiErr.Path != "/vm/missing/tags" {
+		t.Fatalf("unexpected request details: %#v", apiErr)
 	}
 }
