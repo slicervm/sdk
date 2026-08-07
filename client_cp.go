@@ -48,6 +48,33 @@ func requestCopySemantics(q url.Values) {
 	q.Set("copy_semantics", cpCopySemanticsV1)
 }
 
+func shouldRetryLegacyCopy(statusCode int, body []byte, wireMode string) bool {
+	// Agents predating cp-v1 reject its versioned mode before processing the
+	// request body. Match that exact response so other 400s still fail closed.
+	return statusCode == http.StatusBadRequest &&
+		strings.Contains(string(body), "invalid mode: "+wireMode)
+}
+
+func closeCopyResponse(res *http.Response) {
+	if res == nil || res.Body == nil {
+		return
+	}
+	_, _ = io.Copy(io.Discard, res.Body)
+	_ = res.Body.Close()
+}
+
+func legacyCopyMetadata(remotePath, typeName string, copyContents bool) (*copySourceMetadata, error) {
+	cleanPath := pathpkg.Clean(remotePath)
+	name := pathpkg.Base(cleanPath)
+	if copyContents && (cleanPath == "." || cleanPath == "/") {
+		name = ""
+	}
+	if !copyContents && !validCopySourceName(name) {
+		return nil, fmt.Errorf("cannot infer copy source name from legacy path %q", remotePath)
+	}
+	return &copySourceMetadata{name: name, typeName: typeName, copyContents: copyContents}, nil
+}
+
 func localCopySourceMetadata(localPath, absSrc, mode string) (copySourceMetadata, error) {
 	info, err := os.Lstat(absSrc)
 	if err != nil {
@@ -121,57 +148,67 @@ func copyToVMBinary(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath
 	}
 
 	u.Path = fmt.Sprintf("/vm/%s/cp", vmName)
-	q := url.Values{}
-	q.Set("path", vmPath)
-	q.Set("mode", cpWireModeBinaryV1)
-	setCopySemanticsQuery(q, metadata)
-
-	if uid != NonRootUser {
-		q.Set("uid", strconv.FormatUint(uint64(uid), 10))
-	}
-	if gid != NonRootUser {
-		q.Set("gid", strconv.FormatUint(uint64(gid), 10))
-	}
-
-	if len(permissions) > 0 {
-		q.Set("permissions", permissions)
-	}
-
-	u.RawQuery = q.Encode()
-
-	f, err := os.Open(absSrc)
-	if err != nil {
-		return fmt.Errorf("failed to open source file: %w", err)
-	}
-	defer f.Close()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), f)
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-	req.GetBody = func() (io.ReadCloser, error) {
-		return os.Open(absSrc)
-	}
-
-	req.Header.Set("Content-Type", "application/octet-stream")
-	c.setAuthHeaders(req)
-
-	res, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to perform POST request: %w", err)
-	}
-	if res.Body != nil {
-		defer func() {
-			_, _ = io.Copy(io.Discard, res.Body)
-			_ = res.Body.Close()
-		}()
-	}
-
-	if res.StatusCode != http.StatusOK {
-		var body []byte
-		if res.Body != nil {
-			body, _ = io.ReadAll(res.Body)
+	doCopy := func(wireMode string, v1 bool) (*http.Response, error) {
+		q := url.Values{}
+		q.Set("path", vmPath)
+		q.Set("mode", wireMode)
+		if v1 {
+			setCopySemanticsQuery(q, metadata)
 		}
+		if uid != NonRootUser {
+			q.Set("uid", strconv.FormatUint(uint64(uid), 10))
+		}
+		if gid != NonRootUser {
+			q.Set("gid", strconv.FormatUint(uint64(gid), 10))
+		}
+		if len(permissions) > 0 {
+			q.Set("permissions", permissions)
+		}
+
+		requestURL := *u
+		requestURL.RawQuery = q.Encode()
+		f, err := os.Open(absSrc)
+		if err != nil {
+			return nil, fmt.Errorf("failed to open source file: %w", err)
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, requestURL.String(), f)
+		if err != nil {
+			_ = f.Close()
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+		req.GetBody = func() (io.ReadCloser, error) {
+			return os.Open(absSrc)
+		}
+		req.Header.Set("Content-Type", "application/octet-stream")
+		c.setAuthHeaders(req)
+
+		res, err := c.httpClient.Do(req)
+		_ = f.Close()
+		if err != nil {
+			return nil, fmt.Errorf("failed to perform POST request: %w", err)
+		}
+		return res, nil
+	}
+
+	res, err := doCopy(cpWireModeBinaryV1, true)
+	if err != nil {
+		return err
+	}
+	if res.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(res.Body)
+		if !shouldRetryLegacyCopy(res.StatusCode, body, cpWireModeBinaryV1) {
+			closeCopyResponse(res)
+			return fmt.Errorf("failed to copy to VM: %s: %s", res.Status, string(body))
+		}
+		closeCopyResponse(res)
+		res, err = doCopy("binary", false)
+		if err != nil {
+			return err
+		}
+	}
+	defer closeCopyResponse(res)
+	if res.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(res.Body)
 		return fmt.Errorf("failed to copy to VM: %s: %s", res.Status, string(body))
 	}
 
@@ -198,67 +235,76 @@ func copyToVMTar(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath st
 		return pr
 	}
 
-	pr := newTarBody()
-	defer pr.Close()
-
-	q := url.Values{}
-	q.Set("path", vmPath)
-	q.Set("mode", cpWireModeTarV1)
-	setCopySemanticsQuery(q, metadata)
-	if uid != NonRootUser {
-		q.Set("uid", strconv.FormatUint(uint64(uid), 10))
-	}
-	if gid != NonRootUser {
-		q.Set("gid", strconv.FormatUint(uint64(gid), 10))
-	}
-	if len(permissions) > 0 {
-		q.Set("permissions", permissions)
-	}
-	for _, pattern := range excludePatterns {
-		pattern = strings.TrimSpace(pattern)
-		if pattern == "" {
-			continue
-		}
-		q.Add("exclude", pattern)
-	}
-
 	u, err := url.Parse(c.baseURL)
 	if err != nil {
 		return fmt.Errorf("failed to parse API URL: %w", err)
 	}
-
 	u.Path = fmt.Sprintf("/vm/%s/cp", vmName)
-	u.RawQuery = q.Encode()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), pr)
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-	req.GetBody = func() (io.ReadCloser, error) {
-		return newTarBody(), nil
-	}
-
-	req.Header.Set("Content-Type", "application/x-tar")
-	req.Header.Set(unpackedSizeHeader, strconv.FormatInt(unpackedSize, 10))
-	c.setAuthHeaders(req)
-
-	res, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to perform POST request: %w", err)
-	}
-
-	if res.Body != nil {
-		defer func() {
-			_, _ = io.Copy(io.Discard, res.Body)
-			_ = res.Body.Close()
-		}()
-	}
-
-	if res.StatusCode != http.StatusOK {
-		var body []byte
-		if res.Body != nil {
-			body, _ = io.ReadAll(res.Body)
+	doCopy := func(wireMode string, v1 bool) (*http.Response, error) {
+		q := url.Values{}
+		q.Set("path", vmPath)
+		q.Set("mode", wireMode)
+		if v1 {
+			setCopySemanticsQuery(q, metadata)
 		}
+		if uid != NonRootUser {
+			q.Set("uid", strconv.FormatUint(uint64(uid), 10))
+		}
+		if gid != NonRootUser {
+			q.Set("gid", strconv.FormatUint(uint64(gid), 10))
+		}
+		if len(permissions) > 0 {
+			q.Set("permissions", permissions)
+		}
+		for _, pattern := range excludePatterns {
+			pattern = strings.TrimSpace(pattern)
+			if pattern != "" {
+				q.Add("exclude", pattern)
+			}
+		}
+
+		requestURL := *u
+		requestURL.RawQuery = q.Encode()
+		body := newTarBody()
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, requestURL.String(), body)
+		if err != nil {
+			_ = body.Close()
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+		req.GetBody = func() (io.ReadCloser, error) {
+			return newTarBody(), nil
+		}
+		req.Header.Set("Content-Type", "application/x-tar")
+		req.Header.Set(unpackedSizeHeader, strconv.FormatInt(unpackedSize, 10))
+		c.setAuthHeaders(req)
+
+		res, err := c.httpClient.Do(req)
+		_ = body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("failed to perform POST request: %w", err)
+		}
+		return res, nil
+	}
+
+	res, err := doCopy(cpWireModeTarV1, true)
+	if err != nil {
+		return err
+	}
+	if res.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(res.Body)
+		if !shouldRetryLegacyCopy(res.StatusCode, body, cpWireModeTarV1) {
+			closeCopyResponse(res)
+			return fmt.Errorf("failed to copy to VM: %s: %s", res.Status, string(body))
+		}
+		closeCopyResponse(res)
+		res, err = doCopy("tar", false)
+		if err != nil {
+			return err
+		}
+	}
+	defer closeCopyResponse(res)
+	if res.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(res.Body)
 		return fmt.Errorf("failed to copy to VM: %s: %s", res.Status, string(body))
 	}
 
@@ -266,57 +312,88 @@ func copyToVMTar(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath st
 }
 
 func copyFromVMTar(ctx context.Context, c *SlicerClient, vmName, vmPath, localPath, permissions string, recursive bool, excludePatterns ...string) error {
-	q := url.Values{}
-	q.Set("path", vmPath)
+	v1Mode := cpWireModeTarV1
 	if recursive {
-		q.Set("mode", cpWireModeRecursiveV1)
-	} else {
-		q.Set("mode", cpWireModeTarV1)
+		v1Mode = cpWireModeRecursiveV1
 	}
-	requestCopySemantics(q)
-	for _, pattern := range excludePatterns {
-		pattern = strings.TrimSpace(pattern)
-		if pattern == "" {
-			continue
-		}
-		q.Add("exclude", pattern)
-	}
-
 	u, err := url.Parse(c.baseURL)
 	if err != nil {
 		return fmt.Errorf("failed to parse API URL: %w", err)
 	}
 	u.Path = fmt.Sprintf("/vm/%s/cp", vmName)
-	u.RawQuery = q.Encode()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	if recursive {
-		req.Header.Set("Accept", "application/octet-stream, application/x-tar")
-	} else {
-		req.Header.Set("Accept", "application/x-tar")
-	}
-	c.setAuthHeaders(req)
-
-	res, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to perform GET request: %w", err)
-	}
-	if res.Body != nil {
-		defer func() {
-			_, _ = io.Copy(io.Discard, res.Body)
-			_ = res.Body.Close()
-		}()
-	}
-
-	if res.StatusCode != http.StatusOK {
-		var body []byte
-		if res.Body != nil {
-			body, _ = io.ReadAll(res.Body)
+	doCopy := func(wireMode string, v1 bool) (*http.Response, error) {
+		q := url.Values{}
+		q.Set("path", vmPath)
+		q.Set("mode", wireMode)
+		if v1 {
+			requestCopySemantics(q)
 		}
+		for _, pattern := range excludePatterns {
+			pattern = strings.TrimSpace(pattern)
+			if pattern != "" {
+				q.Add("exclude", pattern)
+			}
+		}
+
+		requestURL := *u
+		requestURL.RawQuery = q.Encode()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL.String(), nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+		if v1 && recursive {
+			req.Header.Set("Accept", "application/octet-stream, application/x-tar")
+		} else {
+			req.Header.Set("Accept", "application/x-tar")
+		}
+		c.setAuthHeaders(req)
+		res, err := c.httpClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("failed to perform GET request: %w", err)
+		}
+		return res, nil
+	}
+
+	legacy := false
+	legacyType := copySourceTypeDir
+	res, err := doCopy(v1Mode, true)
+	if err != nil {
+		return err
+	}
+	if res.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(res.Body)
+		if !shouldRetryLegacyCopy(res.StatusCode, body, v1Mode) {
+			closeCopyResponse(res)
+			return fmt.Errorf("failed to copy from VM: %s: %s", res.Status, string(body))
+		}
+		closeCopyResponse(res)
+		legacy = true
+		legacyMode := "tar"
+		if recursive {
+			legacyMode = "binary"
+			legacyType = copySourceTypeFile
+		}
+		res, err = doCopy(legacyMode, false)
+		if err != nil {
+			return err
+		}
+		if recursive && res.StatusCode == http.StatusBadRequest {
+			body, _ := io.ReadAll(res.Body)
+			if !strings.Contains(string(body), "must specify a file not a directory") {
+				closeCopyResponse(res)
+				return fmt.Errorf("failed to copy from VM: %s: %s", res.Status, string(body))
+			}
+			closeCopyResponse(res)
+			legacyType = copySourceTypeDir
+			res, err = doCopy("tar", false)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	defer closeCopyResponse(res)
+	if res.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(res.Body)
 		return fmt.Errorf("failed to copy from VM: %s: %s", res.Status, string(body))
 	}
 
@@ -325,7 +402,13 @@ func copyFromVMTar(ctx context.Context, c *SlicerClient, vmName, vmPath, localPa
 	if err != nil {
 		return err
 	}
-	if metadata == nil {
+	if legacy {
+		metadata, err = legacyCopyMetadata(vmPath, legacyType, copyContents)
+		if err != nil {
+			return err
+		}
+	}
+	if metadata == nil && !legacy {
 		return fmt.Errorf("copy response did not include cp-v1 metadata")
 	}
 	if metadata != nil && metadata.typeName == copySourceTypeFile {
@@ -381,33 +464,47 @@ func copyFromVMBinary(ctx context.Context, c *SlicerClient, vmName, vmPath, loca
 	}
 
 	u.Path = fmt.Sprintf("/vm/%s/cp", vmName)
-	q := url.Values{}
-	q.Set("path", vmPath)
-	q.Set("mode", cpWireModeBinaryV1)
-	requestCopySemantics(q)
+	doCopy := func(wireMode string, v1 bool) (*http.Response, error) {
+		q := url.Values{}
+		q.Set("path", vmPath)
+		q.Set("mode", wireMode)
+		if v1 {
+			requestCopySemantics(q)
+		}
+		requestURL := *u
+		requestURL.RawQuery = q.Encode()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL.String(), nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+		req.Header.Set("Accept", "application/octet-stream")
+		c.setAuthHeaders(req)
+		res, err := c.httpClient.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("request failed: %w", err)
+		}
+		return res, nil
+	}
 
-	u.RawQuery = q.Encode()
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	legacy := false
+	res, err := doCopy(cpWireModeBinaryV1, true)
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return err
 	}
-
-	req.Header.Set("Accept", "application/octet-stream")
-	c.setAuthHeaders(req)
-
-	res, err := c.httpClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("request failed: %w", err)
+	if res.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(res.Body)
+		if !shouldRetryLegacyCopy(res.StatusCode, body, cpWireModeBinaryV1) {
+			closeCopyResponse(res)
+			return fmt.Errorf("failed to copy from VM: %s: %s", res.Status, string(body))
+		}
+		closeCopyResponse(res)
+		legacy = true
+		res, err = doCopy("binary", false)
+		if err != nil {
+			return err
+		}
 	}
-
-	if res.Body != nil {
-		defer func() {
-			_, _ = io.Copy(io.Discard, res.Body)
-			_ = res.Body.Close()
-		}()
-	}
-
+	defer closeCopyResponse(res)
 	if res.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(res.Body)
 		return fmt.Errorf("failed to copy from VM: %s: %s", res.Status, string(body))
@@ -417,7 +514,13 @@ func copyFromVMBinary(ctx context.Context, c *SlicerClient, vmName, vmPath, loca
 	if err != nil {
 		return err
 	}
-	if metadata == nil {
+	if legacy {
+		metadata, err = legacyCopyMetadata(vmPath, copySourceTypeFile, false)
+		if err != nil {
+			return err
+		}
+	}
+	if metadata == nil && !legacy {
 		return fmt.Errorf("copy response did not include cp-v1 metadata")
 	}
 	return writeBinaryCopyResponse(res, localPath, permissions, metadata)
