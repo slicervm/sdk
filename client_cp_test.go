@@ -440,6 +440,9 @@ func TestCpFromVMRecursiveFallsBackToLegacyBinaryForFile(t *testing.T) {
 		if got := r.URL.Query().Get("mode"); got != "binary" {
 			t.Errorf("legacy mode = %q", got)
 		}
+		if got := r.Header.Get("Accept"); got != "application/octet-stream" {
+			t.Errorf("legacy Accept = %q", got)
+		}
 		_, _ = io.WriteString(w, "notes")
 	}))
 	defer server.Close()
