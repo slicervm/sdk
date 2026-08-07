@@ -146,6 +146,80 @@ func TestCpToVMRequestBodyCanBeReplayed(t *testing.T) {
 	}
 }
 
+func TestCpToVMFallsBackToLegacyMode(t *testing.T) {
+	for _, mode := range []string{"binary", "tar"} {
+		t.Run(mode, func(t *testing.T) {
+			source := filepath.Join(t.TempDir(), "source")
+			if mode == "tar" {
+				if err := os.Mkdir(source, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(source, "file"), []byte("data"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.WriteFile(source, []byte("data"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			v1Mode := cpWireModeBinaryV1
+			if mode == "tar" {
+				v1Mode = cpWireModeTarV1
+			}
+			requests := 0
+			var firstBody []byte
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				body, _ := io.ReadAll(r.Body)
+				if requests == 1 {
+					firstBody = body
+					if got := r.URL.Query().Get("mode"); got != v1Mode {
+						t.Errorf("first mode = %q, want %q", got, v1Mode)
+					}
+					if got := r.URL.Query().Get("copy_semantics"); got != cpCopySemanticsV1 {
+						t.Errorf("first copy_semantics = %q", got)
+					}
+					w.WriteHeader(http.StatusBadRequest)
+					_, _ = io.WriteString(w, `{"error":"cp produced an unexpected error: 400: invalid mode: `+v1Mode+`"}`)
+					return
+				}
+				if got := r.URL.Query().Get("mode"); got != mode {
+					t.Errorf("legacy mode = %q, want %q", got, mode)
+				}
+				for _, key := range []string{"copy_semantics", "source_name", "source_type", "copy_contents"} {
+					if got := r.URL.Query().Get(key); got != "" {
+						t.Errorf("legacy %s = %q, want omitted", key, got)
+					}
+				}
+				if !bytes.Equal(body, firstBody) {
+					t.Error("legacy upload body differs from v1 body")
+				}
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer server.Close()
+
+			client := NewSlicerClient(server.URL, "", "test", server.Client())
+			if err := client.CpToVM(t.Context(), "vm-1", source, "/tmp/destination", NonRootUser, NonRootUser, "", mode); err != nil {
+				t.Fatalf("CpToVM: %v", err)
+			}
+			if requests != 2 {
+				t.Fatalf("requests = %d, want 2", requests)
+			}
+		})
+	}
+}
+
+func TestLegacyCopyRetryRequiresExactOldModeError(t *testing.T) {
+	if !shouldRetryLegacyCopy(http.StatusBadRequest, []byte("invalid mode: cp-v1-binary"), cpWireModeBinaryV1) {
+		t.Fatal("exact old-agent mode error did not trigger retry")
+	}
+	if shouldRetryLegacyCopy(http.StatusBadRequest, []byte("invalid mode"), cpWireModeBinaryV1) {
+		t.Fatal("generic bad request triggered retry")
+	}
+	if shouldRetryLegacyCopy(http.StatusInternalServerError, []byte("invalid mode: cp-v1-binary"), cpWireModeBinaryV1) {
+		t.Fatal("non-400 response triggered retry")
+	}
+}
+
 func TestCpToVMZeroOwnershipMeansRoot(t *testing.T) {
 	for _, mode := range []string{"binary", "tar"} {
 		t.Run(mode, func(t *testing.T) {
@@ -245,6 +319,162 @@ func TestCpFromVMBinaryShapesExistingDirectory(t *testing.T) {
 	if requests != 1 {
 		t.Fatalf("requests = %d, want 1", requests)
 	}
+}
+
+func TestCpFromVMBinaryFallsBackAndShapesExistingDirectory(t *testing.T) {
+	destination := t.TempDir()
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests == 1 {
+			if got := r.URL.Query().Get("mode"); got != cpWireModeBinaryV1 {
+				t.Errorf("first mode = %q", got)
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"error":"cp produced an unexpected error: 400: invalid mode: cp-v1-binary"}`)
+			return
+		}
+		if got := r.URL.Query().Get("mode"); got != "binary" {
+			t.Errorf("legacy mode = %q", got)
+		}
+		if got := r.URL.Query().Get("copy_semantics"); got != "" {
+			t.Errorf("legacy copy_semantics = %q, want omitted", got)
+		}
+		_, _ = io.WriteString(w, "guide")
+	}))
+	defer server.Close()
+
+	client := NewSlicerClient(server.URL, "", "test", server.Client())
+	if err := client.CpFromVM(t.Context(), "vm-1", "~/papermaking-guide.html", destination, "", "binary"); err != nil {
+		t.Fatalf("CpFromVM: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(destination, "papermaking-guide.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "guide" {
+		t.Fatalf("contents = %q", data)
+	}
+	if requests != 2 {
+		t.Fatalf("requests = %d, want 2", requests)
+	}
+}
+
+func TestCpFromVMTarFallsBackToLegacyMode(t *testing.T) {
+	for _, recursive := range []bool{false, true} {
+		name := "tar"
+		v1Mode := cpWireModeTarV1
+		wantRequests := 2
+		if recursive {
+			name = "recursive directory"
+			v1Mode = cpWireModeRecursiveV1
+			wantRequests = 3
+		}
+		t.Run(name, func(t *testing.T) {
+			destination := t.TempDir()
+			archive := makeCopyTestArchive(t, "file.txt", "contents")
+			requests := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				requests++
+				switch requests {
+				case 1:
+					if got := r.URL.Query().Get("mode"); got != v1Mode {
+						t.Errorf("first mode = %q, want %q", got, v1Mode)
+					}
+					w.WriteHeader(http.StatusBadRequest)
+					_, _ = io.WriteString(w, `{"error":"cp produced an unexpected error: 400: invalid mode: `+v1Mode+`"}`)
+				case 2:
+					if recursive {
+						if got := r.URL.Query().Get("mode"); got != "binary" {
+							t.Errorf("legacy probe mode = %q", got)
+						}
+						w.WriteHeader(http.StatusBadRequest)
+						_, _ = io.WriteString(w, `{"error":"cp produced an unexpected error: 400: must specify a file not a directory"}`)
+						return
+					}
+					fallthrough
+				default:
+					if got := r.URL.Query().Get("mode"); got != "tar" {
+						t.Errorf("legacy mode = %q", got)
+					}
+					if got := r.URL.Query().Get("copy_semantics"); got != "" {
+						t.Errorf("legacy copy_semantics = %q, want omitted", got)
+					}
+					_, _ = w.Write(archive)
+				}
+			}))
+			defer server.Close()
+
+			client := NewSlicerClient(server.URL, "", "test", server.Client())
+			mode := "tar"
+			if recursive {
+				mode = "recursive"
+			}
+			if err := client.CpFromVM(t.Context(), "vm-1", "/work/project", destination, "", mode); err != nil {
+				t.Fatalf("CpFromVM: %v", err)
+			}
+			data, err := os.ReadFile(filepath.Join(destination, "project", "file.txt"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(data) != "contents" {
+				t.Fatalf("contents = %q", data)
+			}
+			if requests != wantRequests {
+				t.Fatalf("requests = %d, want %d", requests, wantRequests)
+			}
+		})
+	}
+}
+
+func TestCpFromVMRecursiveFallsBackToLegacyBinaryForFile(t *testing.T) {
+	destination := t.TempDir()
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests == 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"error":"cp produced an unexpected error: 400: invalid mode: cp-v1-recursive"}`)
+			return
+		}
+		if got := r.URL.Query().Get("mode"); got != "binary" {
+			t.Errorf("legacy mode = %q", got)
+		}
+		_, _ = io.WriteString(w, "notes")
+	}))
+	defer server.Close()
+
+	client := NewSlicerClient(server.URL, "", "test", server.Client())
+	if err := client.CpFromVM(t.Context(), "vm-1", "/tmp/notes.txt", destination, "", "recursive"); err != nil {
+		t.Fatalf("CpFromVM: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(destination, "notes.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "notes" {
+		t.Fatalf("contents = %q", data)
+	}
+	if requests != 2 {
+		t.Fatalf("requests = %d, want 2", requests)
+	}
+}
+
+func makeCopyTestArchive(t *testing.T, name, contents string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	data := []byte(contents)
+	if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o600, Size: int64(len(data)), Typeflag: tar.TypeReg}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tw.Write(data); err != nil {
+		t.Fatal(err)
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
 }
 
 func TestCopyMetadataPreservesSourceNameWhitespace(t *testing.T) {
