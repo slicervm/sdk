@@ -511,10 +511,10 @@ type SlicerAgentHealthResponse struct {
 }
 
 // SlicerShutdownRequest contains parameters for shutting down or rebooting a VM.
-// Action can be "shutdown" (default) to halt the VM or "reboot" to restart it.
+// Action can be "shutdown" to halt the guest or "reboot" to restart it.
 type SlicerShutdownRequest struct {
 	// Action specifies the shutdown action: "shutdown" (halt) or "reboot" (restart).
-	// If empty, defaults to "shutdown".
+	// If empty, the SDK defaults to "reboot" for Firecracker compatibility.
 	Action string `json:"action,omitempty"`
 }
 

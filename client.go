@@ -1286,7 +1286,9 @@ func (c *SlicerClient) GetAgentHealth(ctx context.Context, hostname string, incl
 }
 
 // Shutdown shuts down or reboots a VM.
-// If request is nil, it defaults to shutdown action.
+// If request is nil or its Action is empty, it defaults to reboot. Firecracker
+// uses a guest reboot as its graceful stop mechanism because guest power-off
+// does not terminate the VMM.
 // The request Action field can be "shutdown" (halt) or "reboot" (restart).
 func (c *SlicerClient) Shutdown(ctx context.Context, hostname string, request *SlicerShutdownRequest) error {
 	u, err := url.Parse(c.baseURL)
@@ -1296,7 +1298,10 @@ func (c *SlicerClient) Shutdown(ctx context.Context, hostname string, request *S
 
 	u.Path = fmt.Sprintf("/vm/%s/shutdown", hostname)
 
-	action := "shutdown"
+	// Firecracker cannot terminate the VMM through a guest power-off. A guest
+	// reboot is its graceful stop mechanism, so do not change this default to
+	// "shutdown" to match the method name.
+	action := "reboot"
 	if request != nil && request.Action != "" {
 		action = request.Action
 	}

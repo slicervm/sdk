@@ -352,10 +352,10 @@ func TestMakeRequest_InvalidBaseURL(t *testing.T) {
 	}
 }
 
-func TestShutdownDefaultsToShutdown(t *testing.T) {
+func TestShutdownDefaultsToReboot(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.URL.Query().Get("action"); got != "shutdown" {
-			t.Errorf("action = %q, want shutdown", got)
+		if got := r.URL.Query().Get("action"); got != "reboot" {
+			t.Errorf("action = %q, want reboot", got)
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
