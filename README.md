@@ -135,9 +135,14 @@ When you want to host a "Service" or run a server, such as a Kubernetes cluster,
 | `DeleteNode(groupName, nodeName)` | Delete a node from a host group | `groupName` (string), `nodeName` (string) | error |
 | `PauseVM(ctx, hostname)` | Pause a running VM to save CPU cost | `ctx` (context.Context), `hostname` (string) | error |
 | `ResumeVM(ctx, hostname)` | Resume a paused VM | `ctx` (context.Context), `hostname` (string) | error |
-| `SuspendVM(ctx, hostname)` | Suspend a running VM to disk via a Firecracker snapshot. Memory and disk state are saved; the VM is shut down. **Slicer-for-Mac only, for now** — the Linux daemon will return `501 Not Implemented`. | `ctx` (context.Context), `hostname` (string) | error |
-| `RestoreVM(ctx, hostname)` | Restore a VM from its previously-taken Firecracker snapshot. **Slicer-for-Mac only, for now.** | `ctx` (context.Context), `hostname` (string) | error |
+| `SuspendVM(ctx, hostname)` | Suspend a running VM to disk. Memory, disk, and device state are saved, and the VM process is stopped. Supported by Slicer for Linux and slicer-mac. | `ctx` (context.Context), `hostname` (string) | error |
+| `RestoreVM(ctx, hostname)` | Restore a previously suspended VM. Use `RestoreVMWithOptions` to wait for agent readiness. Supported by Slicer for Linux and slicer-mac. | `ctx` (context.Context), `hostname` (string) | error |
 | `Shutdown(ctx, hostname, request)` | Shutdown or reboot a VM | `ctx` (context.Context), `hostname` (string), `request` (*SlicerShutdownRequest) | error |
+| `GetVMTags(ctx, hostname)` | Get all metadata tags assigned to a VM. | `ctx` (context.Context), `hostname` (string) | (*SlicerVMTags, error) |
+| `UpdateVMTags(ctx, hostname, update)` | Apply an atomic add, remove, or replace operation to mutable tags. | `ctx` (context.Context), `hostname` (string), `update` (SlicerVMTagUpdate) | (*SlicerVMTags, error) |
+| `AddVMTags(ctx, hostname, tags...)` | Add mutable metadata tags. | `ctx` (context.Context), `hostname` (string), `tags` (...string) | (*SlicerVMTags, error) |
+| `RemoveVMTags(ctx, hostname, tags...)` | Remove mutable metadata tags. | `ctx` (context.Context), `hostname` (string), `tags` (...string) | (*SlicerVMTags, error) |
+| `ReplaceVMTags(ctx, hostname, tags...)` | Replace mutable metadata tags. Omit the immutable `name=` tag; the server preserves it. | `ctx` (context.Context), `hostname` (string), `tags` (...string) | (*SlicerVMTags, error) |
 | `GetVMStats(ctx, hostname)` | Get CPU, memory, and disk statistics for a VM or all VMs | `ctx` (context.Context), `hostname` (string, empty for all) | ([]SlicerNodeStat, error) |
 | `GetVMLogs(ctx, hostname, lines)` | Get recent logs from a VM | `ctx` (context.Context), `hostname` (string), `lines` (int, -1 for all) | (*SlicerLogsResponse, error) |
 | `GetInfo(ctx)` | Fetch server version and build information | `ctx` (context.Context) | (*SlicerInfo, error) |
@@ -400,5 +405,6 @@ Notes:
 * If `RamBytes` or `CPUs` are not the values configured on the host group are used; `Userdata`, `SSHKeys` and `ImportUser` are optional.
 * `Userdata` runs on first boot; keep it idempotent.
 * Use a persistent `http.Client` (e.g. with timeout) in production instead of `nil`.
+* The API uses canonical hostnames for VM endpoints. A CLI-friendly name is the ordinary, unique `name=<value>` tag: resolve it with `ListVMs(ctx, ListOptions{Tag: "name=<value>"})`, require one match, then pass that result's `Hostname` to VM methods.
 
 See a more minimal example at: [examples/create/main.go](examples/create/main.go)

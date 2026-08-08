@@ -2,6 +2,7 @@ package slicer
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -348,8 +349,9 @@ func (c *SlicerClient) ExecWaitExit(ctx context.Context, vmName, execID string, 
 	return &out, nil
 }
 
-// ExecDelete reaps an exec's ring buffer and registry entry. Does not kill a
-// running process — pair with ExecKill for "stop and clean up".
+// ExecDelete reaps an exited exec's ring buffer and registry entry. The guest
+// rejects running execs with 409 Conflict; call ExecKill and ExecWaitExit first
+// for "stop and clean up".
 func (c *SlicerClient) ExecDelete(ctx context.Context, vmName, execID string) (*ExecBackgroundDeleteResponse, error) {
 	u, err := c.vmURL(vmName, "exec", execID)
 	if err != nil {
@@ -416,19 +418,5 @@ func newJSONReader(b []byte) io.Reader {
 	if len(b) == 0 || string(b) == "{}" {
 		return nil
 	}
-	return &jsonReader{data: b}
-}
-
-type jsonReader struct {
-	data []byte
-	off  int
-}
-
-func (r *jsonReader) Read(p []byte) (int, error) {
-	if r.off >= len(r.data) {
-		return 0, io.EOF
-	}
-	n := copy(p, r.data[r.off:])
-	r.off += n
-	return n, nil
+	return bytes.NewReader(b)
 }
