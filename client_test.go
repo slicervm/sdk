@@ -352,6 +352,21 @@ func TestMakeRequest_InvalidBaseURL(t *testing.T) {
 	}
 }
 
+func TestShutdownDefaultsToShutdown(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("action"); got != "shutdown" {
+			t.Errorf("action = %q, want shutdown", got)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := NewSlicerClient(server.URL, "", "test-agent", nil)
+	if err := client.Shutdown(t.Context(), "vm-1", nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCreateVMWithOptions_WaitQuery(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {

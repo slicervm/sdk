@@ -1296,7 +1296,7 @@ func (c *SlicerClient) Shutdown(ctx context.Context, hostname string, request *S
 
 	u.Path = fmt.Sprintf("/vm/%s/shutdown", hostname)
 
-	action := "reboot"
+	action := "shutdown"
 	if request != nil && request.Action != "" {
 		action = request.Action
 	}
