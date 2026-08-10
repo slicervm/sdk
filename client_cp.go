@@ -55,6 +55,79 @@ func shouldRetryLegacyCopy(statusCode int, body []byte, wireMode string) bool {
 		strings.Contains(string(body), "invalid mode: "+wireMode)
 }
 
+func remoteCopyDirectorySyntax(destination string) bool {
+	return destination == "~" || strings.HasSuffix(destination, "/")
+}
+
+func remoteCopyPathUsesHome(remotePath string) bool {
+	return remotePath == "~" || strings.HasPrefix(remotePath, "~/")
+}
+
+// statRemoteCopyPath distinguishes a missing path from an older agent which
+// does not implement /fs/stat. The VM root is a reliable capability probe.
+func statRemoteCopyPath(ctx context.Context, c *SlicerClient, vmName, remotePath string) (*SlicerFSInfo, bool, error) {
+	info, err := c.Stat(ctx, vmName, remotePath)
+	if err == nil || !os.IsNotExist(err) {
+		return info, true, err
+	}
+	if remotePath == "/" {
+		return nil, false, nil
+	}
+
+	_, rootErr := c.Stat(ctx, vmName, "/")
+	switch {
+	case rootErr == nil:
+		return nil, true, os.ErrNotExist
+	case os.IsNotExist(rootErr):
+		return nil, false, nil
+	default:
+		return nil, true, rootErr
+	}
+}
+
+// resolveLegacyUploadDestination preserves cp-style placement when an older
+// guest rejects cp-v1 and therefore cannot place the source atomically itself.
+func resolveLegacyUploadDestination(ctx context.Context, c *SlicerClient, vmName, vmPath string, metadata copySourceMetadata, uid uint32) (string, error) {
+	appendSource := func() string {
+		if metadata.copyContents {
+			return vmPath
+		}
+		return pathpkg.Join(vmPath, metadata.name)
+	}
+
+	// Directory syntax is unambiguous for a file. Home itself is also known to
+	// be a directory. Avoid extra capability probes for these common cases.
+	if remoteCopyDirectorySyntax(vmPath) &&
+		(metadata.typeName == copySourceTypeFile || pathpkg.Clean(vmPath) == "~") {
+		return appendSource(), nil
+	}
+
+	// Stat resolves ~ as the guest's default user. Do not use that result when
+	// ownership explicitly selects another user.
+	var destination *SlicerFSInfo
+	if uid == NonRootUser || !remoteCopyPathUsesHome(vmPath) {
+		resolved, statSupported, statErr := statRemoteCopyPath(ctx, c, vmName, vmPath)
+		if statSupported && statErr != nil && !os.IsNotExist(statErr) {
+			return "", fmt.Errorf("failed to stat destination %s: %w", vmPath, statErr)
+		}
+		destination = resolved
+	}
+
+	switch {
+	case destination != nil && destination.Type == "directory":
+		return appendSource(), nil
+	case destination != nil && destination.Type == "symlink" &&
+		(metadata.typeName == copySourceTypeDir || remoteCopyDirectorySyntax(vmPath)):
+		return appendSource(), nil
+	case destination != nil && metadata.typeName == copySourceTypeDir:
+		return "", fmt.Errorf("destination exists and is not a directory: %s", vmPath)
+	case destination != nil:
+		return vmPath, nil
+	default:
+		return vmPath, nil
+	}
+}
+
 func closeCopyResponse(res *http.Response) {
 	if res == nil || res.Body == nil {
 		return
@@ -148,9 +221,9 @@ func copyToVMBinary(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath
 	}
 
 	u.Path = fmt.Sprintf("/vm/%s/cp", vmName)
-	doCopy := func(wireMode string, v1 bool) (*http.Response, error) {
+	doCopy := func(wireMode string, v1 bool, destination string) (*http.Response, error) {
 		q := url.Values{}
-		q.Set("path", vmPath)
+		q.Set("path", destination)
 		q.Set("mode", wireMode)
 		if v1 {
 			setCopySemanticsQuery(q, metadata)
@@ -190,7 +263,7 @@ func copyToVMBinary(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath
 		return res, nil
 	}
 
-	res, err := doCopy(cpWireModeBinaryV1, true)
+	res, err := doCopy(cpWireModeBinaryV1, true, vmPath)
 	if err != nil {
 		return err
 	}
@@ -201,7 +274,11 @@ func copyToVMBinary(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath
 			return fmt.Errorf("failed to copy to VM: %s: %s", res.Status, string(body))
 		}
 		closeCopyResponse(res)
-		res, err = doCopy("binary", false)
+		legacyDestination, resolveErr := resolveLegacyUploadDestination(ctx, c, vmName, vmPath, metadata, uid)
+		if resolveErr != nil {
+			return resolveErr
+		}
+		res, err = doCopy("binary", false, legacyDestination)
 		if err != nil {
 			return err
 		}
@@ -240,9 +317,9 @@ func copyToVMTar(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath st
 		return fmt.Errorf("failed to parse API URL: %w", err)
 	}
 	u.Path = fmt.Sprintf("/vm/%s/cp", vmName)
-	doCopy := func(wireMode string, v1 bool) (*http.Response, error) {
+	doCopy := func(wireMode string, v1 bool, destination string) (*http.Response, error) {
 		q := url.Values{}
-		q.Set("path", vmPath)
+		q.Set("path", destination)
 		q.Set("mode", wireMode)
 		if v1 {
 			setCopySemanticsQuery(q, metadata)
@@ -286,7 +363,7 @@ func copyToVMTar(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath st
 		return res, nil
 	}
 
-	res, err := doCopy(cpWireModeTarV1, true)
+	res, err := doCopy(cpWireModeTarV1, true, vmPath)
 	if err != nil {
 		return err
 	}
@@ -297,7 +374,11 @@ func copyToVMTar(ctx context.Context, c *SlicerClient, absSrc, vmName, vmPath st
 			return fmt.Errorf("failed to copy to VM: %s: %s", res.Status, string(body))
 		}
 		closeCopyResponse(res)
-		res, err = doCopy("tar", false)
+		legacyDestination, resolveErr := resolveLegacyUploadDestination(ctx, c, vmName, vmPath, metadata, uid)
+		if resolveErr != nil {
+			return resolveErr
+		}
+		res, err = doCopy("tar", false, legacyDestination)
 		if err != nil {
 			return err
 		}
@@ -626,7 +707,10 @@ func resolveLocalFileDestination(localPath, sourceName string) (string, error) {
 	case !os.IsNotExist(err):
 		return "", fmt.Errorf("failed to stat local destination: %w", err)
 	case hasPathSeparatorSuffix(localPath):
-		return "", fmt.Errorf("destination directory does not exist: %s", localPath)
+		if err := os.MkdirAll(localPath, 0o755); err != nil {
+			return "", fmt.Errorf("failed to create local destination directory: %w", err)
+		}
+		return filepath.Join(localPath, sourceName), nil
 	default:
 		return localPath, nil
 	}
