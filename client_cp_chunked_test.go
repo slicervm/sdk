@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -18,13 +17,13 @@ import (
 	"time"
 )
 
-func TestSupportsChunkedCopyRequiresV2(t *testing.T) {
+func TestSupportsChunkedCopyAcceptsBothManifestVersions(t *testing.T) {
 	tests := []struct {
 		name   string
 		stdout string
 		want   bool
 	}{
-		{name: "v1", stdout: "chunked-copy-v1\n", want: false},
+		{name: "v1", stdout: "chunked-copy-v1\n", want: true},
 		{name: "v2", stdout: "chunked-copy-v2\n", want: true},
 	}
 
@@ -167,15 +166,24 @@ func TestCpToVMChunkedUploadsManifestAndOrderedChunks(t *testing.T) {
 	}
 }
 
-func TestCpToVMChunkedRequiresV2PlacementSupport(t *testing.T) {
-	cpRequests := 0
+func TestCpToVMChunkedUsesResolvedDestinationWithV1Manifest(t *testing.T) {
+	var manifest CopyManifest
+	var execCalls [][]string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/exec"):
+			execCalls = append(execCalls, append([]string(nil), r.URL.Query()["args"]...))
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = io.WriteString(w, `{"exit_code":0,"stdout":"chunked-copy-v1\n"}`)
+		case strings.HasSuffix(r.URL.Path, "/fs/stat"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"name":"existing","type":"directory"}`)
 		case strings.HasSuffix(r.URL.Path, "/cp"):
-			cpRequests++
+			if path.Base(r.URL.Query().Get("path")) == "manifest.json" {
+				if err := json.NewDecoder(r.Body).Decode(&manifest); err != nil {
+					t.Errorf("decode manifest: %v", err)
+				}
+			}
 			w.WriteHeader(http.StatusOK)
 		default:
 			http.NotFound(w, r)
@@ -192,11 +200,17 @@ func TestCpToVMChunkedRequiresV2PlacementSupport(t *testing.T) {
 		Mode:      "binary",
 		ChunkSize: 4,
 	})
-	if !errors.Is(err, ErrChunkedCopyUnsupported) {
-		t.Fatalf("error = %v, want ErrChunkedCopyUnsupported", err)
+	if err != nil {
+		t.Fatalf("CpToVMChunked: %v", err)
 	}
-	if cpRequests != 0 {
-		t.Fatalf("copy requests = %d, want 0", cpRequests)
+	if manifest.Version != ChunkedCopyManifestVersion || manifest.Destination != "/existing/tool" {
+		t.Fatalf("legacy manifest = %+v", manifest)
+	}
+	if manifest.CopySemantics != "" || manifest.SourceName != "" || manifest.SourceType != "" || manifest.CopyContents {
+		t.Fatalf("legacy manifest includes cp-v1 metadata: %+v", manifest)
+	}
+	if len(execCalls) != 2 || strings.Join(execCalls[0], " ") != "upload check" || !strings.HasPrefix(strings.Join(execCalls[1], " "), "upload finalise ") {
+		t.Fatalf("exec calls = %#v", execCalls)
 	}
 }
 

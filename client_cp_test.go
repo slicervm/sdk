@@ -168,6 +168,10 @@ func TestCpToVMFallsBackToLegacyMode(t *testing.T) {
 			requests := 0
 			var firstBody []byte
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/fs/stat") {
+					http.NotFound(w, r)
+					return
+				}
 				requests++
 				body, _ := io.ReadAll(r.Body)
 				if requests == 1 {
@@ -203,6 +207,105 @@ func TestCpToVMFallsBackToLegacyMode(t *testing.T) {
 			}
 			if requests != 2 {
 				t.Fatalf("requests = %d, want 2", requests)
+			}
+		})
+	}
+}
+
+func TestCpToVMLegacyFallbackPreservesDestinationPlacement(t *testing.T) {
+	tests := []struct {
+		name           string
+		mode           string
+		directory      bool
+		contentsOnly   bool
+		uid            uint32
+		wantNoStat     bool
+		destination    string
+		destinationTyp string
+		wantLegacyPath string
+	}{
+		{name: "file into existing directory", mode: "binary", destination: "/existing", destinationTyp: "directory", wantLegacyPath: "/existing/source"},
+		{name: "file into missing directory syntax", mode: "binary", wantNoStat: true, destination: "/missing/deep/", wantLegacyPath: "/missing/deep/source"},
+		{name: "file renamed with missing parents", mode: "binary", destination: "/missing/deep/renamed", wantLegacyPath: "/missing/deep/renamed"},
+		{name: "directory into existing directory", mode: "tar", directory: true, destination: "/existing", destinationTyp: "directory", wantLegacyPath: "/existing/source"},
+		{name: "directory uses missing destination as target", mode: "tar", directory: true, destination: "/missing/deep/", wantLegacyPath: "/missing/deep/"},
+		{name: "directory into explicit user home", mode: "tar", directory: true, uid: 1234, wantNoStat: true, destination: "~/", wantLegacyPath: "~/source"},
+		{name: "directory renamed", mode: "tar", directory: true, destination: "/renamed", wantLegacyPath: "/renamed"},
+		{name: "directory contents", mode: "tar", directory: true, contentsOnly: true, destination: "/existing", destinationTyp: "directory", wantLegacyPath: "/existing"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := t.TempDir()
+			source := filepath.Join(root, "source")
+			if test.directory {
+				if err := os.Mkdir(source, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(source, "file"), []byte("data"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.WriteFile(source, []byte("data"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			localPath := source
+			if test.contentsOnly {
+				localPath += string(filepath.Separator) + "."
+			}
+
+			v1Mode := cpWireModeBinaryV1
+			if test.mode == "tar" {
+				v1Mode = cpWireModeTarV1
+			}
+			copyRequests := 0
+			statRequests := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case strings.HasSuffix(r.URL.Path, "/fs/stat"):
+					statRequests++
+					path := r.URL.Query().Get("path")
+					if path == "/" {
+						w.Header().Set("Content-Type", "application/json")
+						_, _ = io.WriteString(w, `{"name":"/","type":"directory"}`)
+						return
+					}
+					if path == test.destination && test.destinationTyp != "" {
+						w.Header().Set("Content-Type", "application/json")
+						_, _ = io.WriteString(w, `{"name":"destination","type":"`+test.destinationTyp+`"}`)
+						return
+					}
+					http.NotFound(w, r)
+				case strings.HasSuffix(r.URL.Path, "/cp"):
+					copyRequests++
+					_, _ = io.Copy(io.Discard, r.Body)
+					if copyRequests == 1 {
+						w.WriteHeader(http.StatusBadRequest)
+						_, _ = io.WriteString(w, `{"error":"cp produced an unexpected error: 400: invalid mode: `+v1Mode+`"}`)
+						return
+					}
+					if got := r.URL.Query().Get("path"); got != test.wantLegacyPath {
+						t.Errorf("legacy path = %q, want %q", got, test.wantLegacyPath)
+					}
+					w.WriteHeader(http.StatusOK)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+
+			client := NewSlicerClient(server.URL, "", "test", server.Client())
+			uid := test.uid
+			if uid == 0 {
+				uid = NonRootUser
+			}
+			if err := client.CpToVM(t.Context(), "vm-1", localPath, test.destination, uid, NonRootUser, "", test.mode); err != nil {
+				t.Fatalf("CpToVM: %v", err)
+			}
+			if copyRequests != 2 {
+				t.Fatalf("copy requests = %d, want 2", copyRequests)
+			}
+			if test.wantNoStat && statRequests != 0 {
+				t.Fatalf("stat requests = %d, want 0", statRequests)
 			}
 		})
 	}
@@ -318,6 +421,28 @@ func TestCpFromVMBinaryShapesExistingDirectory(t *testing.T) {
 	}
 	if requests != 1 {
 		t.Fatalf("requests = %d, want 1", requests)
+	}
+}
+
+func TestCpFromVMBinaryCreatesMissingDirectoryDestination(t *testing.T) {
+	destination := filepath.Join(t.TempDir(), "missing", "deep") + string(filepath.Separator)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(copySourceTypeHeader, copySourceTypeFile)
+		w.Header().Set(copySourceNameHeader, encodeCopySourceName("tool"))
+		_, _ = io.WriteString(w, "contents")
+	}))
+	defer server.Close()
+
+	client := NewSlicerClient(server.URL, "", "test", server.Client())
+	if err := client.CpFromVM(t.Context(), "vm-1", "~/bin/tool", destination, "", "binary"); err != nil {
+		t.Fatalf("CpFromVM: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(destination, "tool"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "contents" {
+		t.Fatalf("contents = %q", data)
 	}
 }
 
@@ -635,6 +760,29 @@ func TestCpFromVMTarShapesDirectoryAndContents(t *testing.T) {
 				t.Fatalf("contents = %q", data)
 			}
 		})
+	}
+}
+
+func TestCpFromVMTarCreatesMissingDirectoryDestination(t *testing.T) {
+	destination := filepath.Join(t.TempDir(), "missing", "deep") + string(filepath.Separator)
+	archive := makeCopyTestArchive(t, "file.txt", "contents")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(copySourceTypeHeader, copySourceTypeDir)
+		w.Header().Set(copySourceNameHeader, encodeCopySourceName("project"))
+		_, _ = w.Write(archive)
+	}))
+	defer server.Close()
+
+	client := NewSlicerClient(server.URL, "", "test", server.Client())
+	if err := client.CpFromVM(t.Context(), "vm-1", "/work/project", destination, "", "recursive"); err != nil {
+		t.Fatalf("CpFromVM: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(destination, "file.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "contents" {
+		t.Fatalf("contents = %q", data)
 	}
 }
 

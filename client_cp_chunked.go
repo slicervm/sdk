@@ -50,7 +50,7 @@ func (c *byteCounter) Write(p []byte) (int, error) {
 // finaliser required by CpToVMChunked.
 func (c *SlicerClient) SupportsChunkedCopy(ctx context.Context, vmName string) (bool, error) {
 	version, supported, err := c.chunkedCopyManifestVersion(ctx, vmName)
-	return supported && version >= ChunkedCopyManifestV2, err
+	return supported && version >= ChunkedCopyManifestVersion, err
 }
 
 func (c *SlicerClient) chunkedCopyManifestVersion(ctx context.Context, vmName string) (int, bool, error) {
@@ -103,10 +103,6 @@ func (c *SlicerClient) CpToVMChunked(ctx context.Context, vmName, localPath, vmP
 	if !supported {
 		return ErrChunkedCopyUnsupported
 	}
-	if manifestVersion < ChunkedCopyManifestV2 {
-		return fmt.Errorf("%w: guest agent does not support cp-v1 chunk placement", ErrChunkedCopyUnsupported)
-	}
-
 	absSrc, err := filepath.Abs(localPath)
 	if err != nil {
 		return fmt.Errorf("get absolute source path: %w", err)
@@ -115,11 +111,18 @@ func (c *SlicerClient) CpToVMChunked(ctx context.Context, vmName, localPath, vmP
 	if err != nil {
 		return err
 	}
+	destination := vmPath
+	if manifestVersion < ChunkedCopyManifestV2 {
+		destination, err = resolveLegacyUploadDestination(ctx, c, vmName, vmPath, metadata, opts.UID)
+		if err != nil {
+			return err
+		}
+	}
 	sessionID, err := newCopySessionID()
 	if err != nil {
 		return err
 	}
-	sessionPath, err := copySessionPath(vmPath, sessionID)
+	sessionPath, err := copySessionPath(destination, sessionID)
 	if err != nil {
 		return err
 	}
@@ -144,17 +147,19 @@ func (c *SlicerClient) CpToVMChunked(ctx context.Context, vmName, localPath, vmP
 	manifest := CopyManifest{
 		Version:      manifestVersion,
 		Mode:         opts.Mode,
-		Destination:  vmPath,
+		Destination:  destination,
 		UID:          opts.UID,
 		GID:          opts.GID,
 		Permissions:  opts.Permissions,
 		UnpackedSize: source.unpackedSize,
 		Chunks:       []CopyChunk{},
 	}
-	manifest.CopySemantics = cpCopySemanticsV1
-	manifest.SourceName = metadata.name
-	manifest.SourceType = metadata.typeName
-	manifest.CopyContents = metadata.copyContents
+	if manifestVersion >= ChunkedCopyManifestV2 {
+		manifest.CopySemantics = cpCopySemanticsV1
+		manifest.SourceName = metadata.name
+		manifest.SourceType = metadata.typeName
+		manifest.CopyContents = metadata.copyContents
+	}
 	for offset := int64(0); offset < source.size; offset += int64(opts.ChunkSize) {
 		size := int64(opts.ChunkSize)
 		if remaining := source.size - offset; remaining < size {
