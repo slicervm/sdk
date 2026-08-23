@@ -1083,10 +1083,21 @@ func (c *SlicerClient) GetVMTags(ctx context.Context, hostname string) (*SlicerV
 	return c.updateVMTags(ctx, http.MethodGet, hostname, nil)
 }
 
-// UpdateVMTags applies an atomic add, remove, or replace operation to a VM's
-// metadata tags.
+// UpdateVMTags applies an atomic add, remove, replace, or name operation to a
+// VM's metadata tags.
 func (c *SlicerClient) UpdateVMTags(ctx context.Context, hostname string, update SlicerVMTagUpdate) (*SlicerVMTags, error) {
 	return c.updateVMTags(ctx, http.MethodPatch, hostname, update)
+}
+
+// SetVMName assigns or changes a VM's friendly name.
+func (c *SlicerClient) SetVMName(ctx context.Context, hostname, name string) (*SlicerVMTags, error) {
+	return c.UpdateVMTags(ctx, hostname, SlicerVMTagUpdate{Name: &name})
+}
+
+// ClearVMName removes a VM's friendly name.
+func (c *SlicerClient) ClearVMName(ctx context.Context, hostname string) (*SlicerVMTags, error) {
+	name := ""
+	return c.UpdateVMTags(ctx, hostname, SlicerVMTagUpdate{Name: &name})
 }
 
 // AddVMTags adds metadata tags to a VM.

@@ -492,6 +492,8 @@ func TestVMTags(t *testing.T) {
 		{method: http.MethodPatch, body: `{"add":["role=builder"]}`},
 		{method: http.MethodPatch, body: `{"remove":["old"]}`},
 		{method: http.MethodPatch, body: `{"replace":[]}`},
+		{method: http.MethodPatch, body: `{"name":"builder"}`},
+		{method: http.MethodPatch, body: `{"name":""}`},
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if len(requests) == 0 {
@@ -522,6 +524,12 @@ func TestVMTags(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := client.ReplaceVMTags(context.Background(), "vm-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.SetVMName(context.Background(), "vm-1", "builder"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.ClearVMName(context.Background(), "vm-1"); err != nil {
 		t.Fatal(err)
 	}
 	if len(requests) != 0 {

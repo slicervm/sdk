@@ -139,10 +139,12 @@ When you want to host a "Service" or run a server, such as a Kubernetes cluster,
 | `RestoreVM(ctx, hostname)` | Restore a previously suspended VM. Use `RestoreVMWithOptions` to wait for agent readiness. Supported by Slicer for Linux and slicer-mac. | `ctx` (context.Context), `hostname` (string) | error |
 | `Shutdown(ctx, hostname, request)` | Shutdown or reboot a VM | `ctx` (context.Context), `hostname` (string), `request` (*SlicerShutdownRequest) | error |
 | `GetVMTags(ctx, hostname)` | Get all metadata tags assigned to a VM. | `ctx` (context.Context), `hostname` (string) | (*SlicerVMTags, error) |
-| `UpdateVMTags(ctx, hostname, update)` | Apply an atomic add, remove, or replace operation to mutable tags. | `ctx` (context.Context), `hostname` (string), `update` (SlicerVMTagUpdate) | (*SlicerVMTags, error) |
-| `AddVMTags(ctx, hostname, tags...)` | Add mutable metadata tags. | `ctx` (context.Context), `hostname` (string), `tags` (...string) | (*SlicerVMTags, error) |
-| `RemoveVMTags(ctx, hostname, tags...)` | Remove mutable metadata tags. | `ctx` (context.Context), `hostname` (string), `tags` (...string) | (*SlicerVMTags, error) |
-| `ReplaceVMTags(ctx, hostname, tags...)` | Replace mutable metadata tags. Omit the immutable `name=` tag; the server preserves it. | `ctx` (context.Context), `hostname` (string), `tags` (...string) | (*SlicerVMTags, error) |
+| `UpdateVMTags(ctx, hostname, update)` | Apply an atomic add, remove, replace, or friendly-name operation to VM tags. | `ctx` (context.Context), `hostname` (string), `update` (SlicerVMTagUpdate) | (*SlicerVMTags, error) |
+| `SetVMName(ctx, hostname, name)` | Assign or change a VM's friendly name. | `ctx` (context.Context), `hostname` (string), `name` (string) | (*SlicerVMTags, error) |
+| `ClearVMName(ctx, hostname)` | Remove a VM's friendly name. | `ctx` (context.Context), `hostname` (string) | (*SlicerVMTags, error) |
+| `AddVMTags(ctx, hostname, tags...)` | Add metadata tags. | `ctx` (context.Context), `hostname` (string), `tags` (...string) | (*SlicerVMTags, error) |
+| `RemoveVMTags(ctx, hostname, tags...)` | Remove metadata tags. | `ctx` (context.Context), `hostname` (string), `tags` (...string) | (*SlicerVMTags, error) |
+| `ReplaceVMTags(ctx, hostname, tags...)` | Replace metadata tags. The existing `name=` tag is preserved unless the replacement includes one. | `ctx` (context.Context), `hostname` (string), `tags` (...string) | (*SlicerVMTags, error) |
 | `GetVMStats(ctx, hostname)` | Get CPU, memory, and disk statistics for a VM or all VMs | `ctx` (context.Context), `hostname` (string, empty for all) | ([]SlicerNodeStat, error) |
 | `GetVMLogs(ctx, hostname, lines)` | Get recent logs from a VM | `ctx` (context.Context), `hostname` (string), `lines` (int, -1 for all) | (*SlicerLogsResponse, error) |
 | `GetInfo(ctx)` | Fetch server version and build information | `ctx` (context.Context) | (*SlicerInfo, error) |

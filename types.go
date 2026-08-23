@@ -31,11 +31,13 @@ type SlicerVMTags struct {
 }
 
 // SlicerVMTagUpdate describes an atomic VM tag update. Replace cannot be
-// combined with Add or Remove.
+// combined with Add or Remove. Name assigns a friendly VM name when non-empty
+// and removes it when explicitly set to an empty string.
 type SlicerVMTagUpdate struct {
 	Add     []string  `json:"add,omitempty"`
 	Remove  []string  `json:"remove,omitempty"`
 	Replace *[]string `json:"replace,omitempty"`
+	Name    *string   `json:"name,omitempty"`
 }
 
 // SlicerCreateNodeRequest contains parameters for creating a node
