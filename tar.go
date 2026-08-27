@@ -184,7 +184,8 @@ func normalizeExcludePatterns(patterns ...string) []string {
 			continue
 		}
 		pattern = strings.TrimPrefix(pattern, "./")
-		pattern = strings.TrimPrefix(pattern, "/")
+		// Preserve a leading slash so root-anchored patterns do not fall
+		// through to basename matching at every directory depth.
 		pattern = strings.TrimSuffix(pattern, "/")
 
 		if pattern != "" {
