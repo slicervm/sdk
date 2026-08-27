@@ -14,7 +14,7 @@ import (
 
 func TestNormalizeExcludePatterns(t *testing.T) {
 	got := normalizeExcludePatterns("  ./foo/ ", "/bar/ ", "  baz  ", "", " ./a/b/ ")
-	want := []string{"foo", "bar", "baz", "a/b"}
+	want := []string{"foo", "/bar", "baz", "a/b"}
 
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("normalizeExcludePatterns() = %#v, want %#v", got, want)
@@ -42,6 +42,53 @@ func TestShouldExcludePath(t *testing.T) {
 
 	if !shouldExcludePath("a/x/deep", excludes) {
 		t.Fatal("expected recursive pattern 'a/**/deep' to match")
+	}
+}
+
+func TestShouldExcludePathHonoursRootAnchor(t *testing.T) {
+	excludes := normalizeExcludePatterns("/superterm", "/superterm-tui")
+
+	for _, name := range []string{"superterm", "superterm-tui"} {
+		if !shouldExcludePath(name, excludes) {
+			t.Fatalf("expected root path %q to be excluded", name)
+		}
+	}
+
+	for _, name := range []string{"internal/superterm", "cmd/superterm-tui"} {
+		if shouldExcludePath(name, excludes) {
+			t.Fatalf("root-anchored pattern unexpectedly excluded %q", name)
+		}
+	}
+
+	if !shouldExcludePath("internal/superterm", normalizeExcludePatterns("superterm")) {
+		t.Fatal("expected unanchored basename pattern to match at any depth")
+	}
+}
+
+func TestStreamTarArchiveHonoursRootAnchoredExclude(t *testing.T) {
+	root := t.TempDir()
+	source := filepath.Join(root, "source")
+	if err := os.MkdirAll(filepath.Join(source, "internal", "superterm"), 0o755); err != nil {
+		t.Fatalf("create source directories: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "superterm"), []byte("binary"), 0o755); err != nil {
+		t.Fatalf("write root binary: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(source, "internal", "superterm", "main.go"), []byte("package superterm\n"), 0o644); err != nil {
+		t.Fatalf("write nested source: %v", err)
+	}
+
+	var archive bytes.Buffer
+	if err := StreamTarArchive(context.Background(), &archive, root, "source", "/superterm"); err != nil {
+		t.Fatalf("StreamTarArchive() error = %v", err)
+	}
+
+	names := collectTarEntryNames(t, archive.Bytes())
+	if _, ok := names["superterm"]; ok {
+		t.Fatal("expected root binary to be excluded")
+	}
+	if _, ok := names["internal/superterm/main.go"]; !ok {
+		t.Fatal("expected nested source file to be included")
 	}
 }
 
