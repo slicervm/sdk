@@ -42,10 +42,13 @@ type SlicerVMTagUpdate struct {
 
 // SlicerCreateNodeRequest contains parameters for creating a node
 type SlicerCreateNodeRequest struct {
-	RamBytes   int64                          `json:"ram_bytes,omitempty"` // RAM size in bytes (must not exceed host group limit)
-	CPUs       int                            `json:"cpus,omitempty"`      // Number of CPUs (must not exceed host group limit)
-	GPUCount   int                            `json:"gpu_count,omitempty"`
-	Persistent bool                           `json:"persistent,omitempty"`
+	RamBytes   int64 `json:"ram_bytes,omitempty"` // RAM size in bytes (must not exceed host group limit)
+	CPUs       int   `json:"cpus,omitempty"`      // Number of CPUs (must not exceed host group limit)
+	GPUCount   int   `json:"gpu_count,omitempty"`
+	Persistent bool  `json:"persistent,omitempty"`
+	// Deprecated: rejected by the API — a non-empty value returns 400.
+	// The disk image is always <hostname>.img in the working directory.
+	// Kept for wire compatibility.
 	DiskImage  string                         `json:"disk_image,omitempty"`
 	ImportUser string                         `json:"import_user,omitempty"`
 	SSHKeys    []string                       `json:"ssh_keys,omitempty"`
