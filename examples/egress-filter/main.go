@@ -76,15 +76,6 @@ func main() {
 	}
 	log.Printf("daemon API at %s:%d (workdir %s)", apiHost, apiPort, sup.workdir)
 
-	if keep {
-		// Keep the daemon + proxy up for inspection. Park until a signal, then
-		// let the supervisor tear them down.
-		log.Printf("-keep set: daemon + proxy left up (API 0.0.0.0:%d); Ctrl-C/SIGTERM tears them down", apiPort)
-		waitForSignal(sup)
-		return
-	}
-	defer sup.stop()
-
 	if localIP == "" {
 		ip, dErr := outboundIP()
 		if dErr == nil {
@@ -100,12 +91,10 @@ func main() {
 	if err != nil {
 		fatal(sup, "start allowed upstream: %v", err)
 	}
-	defer allowed.Close()
 	denied, err := startUpstream(localIP, "denied")
 	if err != nil {
 		fatal(sup, "start denied upstream: %v", err)
 	}
-	defer denied.Close()
 
 	clientToken, err := retry(func() (string, error) { return configureProxy(ctx, sup.client, "egress-filter", allowed, denied) }, 60*time.Second)
 	if err != nil {
@@ -124,7 +113,19 @@ func main() {
 	}
 	log.Printf("VM %s ready (ip=%s)", node.Hostname, node.IP)
 	sup.vm = node.Hostname
-	defer func() { _, _ = sup.client.DeleteVM(ctx, group, node.Hostname) }()
+
+	// One teardown path, gated on !keep so -keep preserves the whole stack.
+	cleanup := func() {
+		if sup.vm != "" {
+			_, _ = sup.client.DeleteVM(context.Background(), group, sup.vm)
+		}
+		allowed.Close()
+		denied.Close()
+		sup.stop()
+	}
+	if !keep {
+		defer cleanup()
+	}
 
 	// The guest may only reach the gateway under the --drop 0.0.0.0/0 policy;
 	// the plaintext proxy data-plane listens there on 3128.
@@ -160,6 +161,11 @@ func main() {
 	log.Printf("PASS  3 revoked upstream refused after RemoveProxyAllow (403)")
 
 	fmt.Println("All egress rules proved.")
+
+	if keep {
+		log.Printf("-keep set: leaving VM %s, proxy config and daemon up for inspection (API 0.0.0.0:%d); Ctrl-C/SIGTERM tears the stack down", node.Hostname, apiPort)
+		waitForSignal(cleanup)
+	}
 }
 
 // fatal logs, deletes any created VM, tears the supervised stack down, then
@@ -175,13 +181,13 @@ func fatal(sup *supervisor, format string, a ...any) {
 	os.Exit(1)
 }
 
-// waitForSignal parks the supervisor until SIGINT/SIGTERM, then tears the stack
-// down. Used by -keep so the daemon and proxy stay up for inspection.
-func waitForSignal(sup *supervisor) {
+// waitForSignal parks the supervisor until SIGINT/SIGTERM, then runs the
+// cleanup. Used by -keep so the stack can be inspected before tearing down.
+func waitForSignal(cleanup func()) {
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	<-sig
-	sup.stop()
+	cleanup()
 }
 
 // retry runs fn, retrying on any error with backoff for up to timeout.
