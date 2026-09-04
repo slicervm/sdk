@@ -320,6 +320,11 @@ func boot(ctx context.Context, cfg supervisorConfig) (*supervisor, error) {
 		"--min", "--count=0",
 		"--net=isolated",
 		"--isolated-range", cfg.cidr,
+		// IPv4 egress is a strict whitelist to the gateway (where the proxy
+		// listens). IPv6 needs no drop list here: the isolated tap disables IPv6
+		// (net.ipv6 conf disable_ipv6=1) and the netns is IPv4-only, so the guest
+		// has no IPv6 path at all. The drop firewall is iptables-only, so a
+		// v6 "::/0" entry would be rejected rather than add protection.
 		"--drop", "0.0.0.0/0",
 		"--allow", cfg.gateway,
 		"--no-dns",
