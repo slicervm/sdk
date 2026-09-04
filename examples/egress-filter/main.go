@@ -228,6 +228,9 @@ func newCmd(cfg supervisorConfig, args ...string) *exec.Cmd {
 	if cfg.sudo {
 		c = exec.Command("sudo", append([]string{"-E", cfg.bin}, args...)...)
 	}
+	// Own process group so stop can kill the whole tree (sudo exec'd the slicer
+	// process into the same group as the sudo wrapper).
+	c.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	return c
 }
 
@@ -348,12 +351,23 @@ func boot(ctx context.Context, cfg supervisorConfig) (*supervisor, error) {
 
 // stop tears down the supervised daemon and proxy and removes the temp dir.
 func (s *supervisor) stop() {
-	if s.daemon != nil && s.daemon.Process != nil {
-		_ = s.daemon.Process.Kill()
+	// Kill the whole process group so the slicer daemon/proxy (exec'd by sudo
+	// into the same group as the wrapper) is stopped too, not just the local
+	// sudo process. As a non-root supervisor we need sudo to signal the root
+	// daemon, so route the group kill through sudo when configured.
+	stopGroup := func(c *exec.Cmd) {
+		if c == nil || c.Process == nil {
+			return
+		}
+		if s.cfg.sudo && os.Geteuid() != 0 {
+			_ = exec.Command("sudo", "-E", "kill", "-KILL", "--", "-"+strconv.Itoa(c.Process.Pid)).Run()
+		} else {
+			_ = syscall.Kill(-c.Process.Pid, syscall.SIGKILL)
+		}
+		_, _ = c.Process.Wait() // reap the local wrapper
 	}
-	if s.proxy != nil && s.proxy.Process != nil {
-		_ = s.proxy.Process.Kill()
-	}
+	stopGroup(s.proxy)
+	stopGroup(s.daemon)
 	_ = os.RemoveAll(s.workdir)
 	log.Printf("supervisor: daemon + proxy stopped, workdir removed")
 }
