@@ -9,9 +9,11 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	slicer "github.com/slicervm/sdk"
@@ -75,7 +77,10 @@ func main() {
 	log.Printf("daemon API at %s:%d (workdir %s)", apiHost, apiPort, sup.workdir)
 
 	if keep {
-		log.Printf("--keep set: leaving daemon/proxy/VM running")
+		// Keep the daemon + proxy up for inspection. Park until a signal, then
+		// let the supervisor tear them down.
+		log.Printf("-keep set: daemon + proxy left up (API 0.0.0.0:%d); Ctrl-C/SIGTERM tears them down", apiPort)
+		waitForSignal(sup)
 		return
 	}
 	defer sup.stop()
@@ -91,9 +96,15 @@ func main() {
 
 	// Self-hosted upstreams (plain HTTP) on this host's loopback/LAN so the
 	// co-located proxy can dial them via absolute-form requests.
-	allowed := startUpstream(localIP, "allowed")
+	allowed, err := startUpstream(localIP, "allowed")
+	if err != nil {
+		fatal(sup, "start allowed upstream: %v", err)
+	}
 	defer allowed.Close()
-	denied := startUpstream(localIP, "denied")
+	denied, err := startUpstream(localIP, "denied")
+	if err != nil {
+		fatal(sup, "start denied upstream: %v", err)
+	}
 	defer denied.Close()
 
 	clientToken, err := retry(func() (string, error) { return configureProxy(ctx, sup.client, "egress-filter", allowed, denied) }, 60*time.Second)
@@ -164,6 +175,15 @@ func fatal(sup *supervisor, format string, a ...any) {
 	os.Exit(1)
 }
 
+// waitForSignal parks the supervisor until SIGINT/SIGTERM, then tears the stack
+// down. Used by -keep so the daemon and proxy stay up for inspection.
+func waitForSignal(sup *supervisor) {
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	<-sig
+	sup.stop()
+}
+
 // retry runs fn, retrying on any error with backoff for up to timeout.
 func retry[T any](fn func() (T, error), timeout time.Duration) (T, error) {
 	deadline := time.Now().Add(timeout)
@@ -188,6 +208,19 @@ func retry[T any](fn func() (T, error), timeout time.Duration) (T, error) {
 }
 
 const defaultGateway = "192.168.141.1"
+
+// newCmd builds the command for a supervised slicer subcommand, prefixing sudo
+// when requested. Not context-bound, so its lifecycle is owned by the
+// supervisor rather than the caller's context.
+func newCmd(cfg supervisorConfig, args ...string) *exec.Cmd {
+	full := append([]string{}, cfg.bin)
+	full = append(full, args...)
+	c := exec.Command(full[0], full[1:]...)
+	if cfg.sudo {
+		c = exec.Command("sudo", append([]string{"-E", cfg.bin}, args...)...)
+	}
+	return c
+}
 
 type supervisorConfig struct {
 	bin, group, storage, gateway, cidr, apiHost, licenseFile string
@@ -250,12 +283,11 @@ func boot(ctx context.Context, cfg supervisorConfig) (*supervisor, error) {
 		return nil, err
 	}
 
-	// Start the daemon as a supervised child process.
+	// Start the daemon as a supervised child process. These are plain exec.Cmd
+	// (not CommandContext) so the -keep path can hold them up for inspection;
+	// the supervisor kills them explicitly via stop.
 	upArgs := append(append([]string{}, license...), "up", yamlPath)
-	daemon := exec.CommandContext(ctx, cfg.bin, upArgs...)
-	if cfg.sudo {
-		daemon = exec.CommandContext(ctx, "sudo", append([]string{"-E", cfg.bin}, upArgs...)...)
-	}
+	daemon := newCmd(cfg, upArgs...)
 	daemon.Stdout = os.Stderr
 	daemon.Stderr = os.Stderr
 	if err := daemon.Start(); err != nil {
@@ -266,10 +298,7 @@ func boot(ctx context.Context, cfg supervisorConfig) (*supervisor, error) {
 	// Start the proxy data-plane as a second supervised child process.
 	proxyArgs := append(append([]string{}, license...),
 		"proxy", "up", "--bind", cfg.gateway, "--hostgroup", cfg.group)
-	proxy := exec.CommandContext(ctx, cfg.bin, proxyArgs...)
-	if cfg.sudo {
-		proxy = exec.CommandContext(ctx, "sudo", append([]string{"-E", cfg.bin}, proxyArgs...)...)
-	}
+	proxy := newCmd(cfg, proxyArgs...)
 	proxy.Stdout = os.Stderr
 	proxy.Stderr = os.Stderr
 	if err := proxy.Start(); err != nil {
@@ -312,18 +341,18 @@ type upstream struct {
 	srv     *http.Server
 }
 
-func startUpstream(ip, tag string) *upstream {
+func startUpstream(ip, tag string) (*upstream, error) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/echo", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprintf(w, "hosttag=%s\nauth=%s\n", tag, r.Header.Get("Authorization"))
 	})
 	ln, err := net.Listen("tcp", ip+":0")
 	if err != nil {
-		log.Fatalf("listen upstream on %s: %v", ip, err)
+		return nil, err
 	}
 	srv := &http.Server{Handler: mux}
 	go func() { _ = srv.Serve(ln) }()
-	return &upstream{ip: ip, portNum: ln.Addr().(*net.TCPAddr).Port, srv: srv}
+	return &upstream{ip: ip, portNum: ln.Addr().(*net.TCPAddr).Port, srv: srv}, nil
 }
 
 func (u *upstream) Close() { _ = u.srv.Close() }
