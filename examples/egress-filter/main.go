@@ -115,9 +115,9 @@ func main() {
 	proxyURL := "http://:" + clientToken + "@" + gateway + ":3128"
 
 	// 1. Allowed upstream returns 200 and carries the injected credential.
-	out, err := guestCurl(ctx, sup.client, node.Hostname, proxyURL, allowed)
-	if err != nil {
-		fatal(sup, "assert 1 FAILED (allowed + secret): curl: %v\nbody: %s", err, out)
+	out, statusCode := guestCurl(ctx, sup.client, node.Hostname, proxyURL, allowed)
+	if statusCode != 200 {
+		fatal(sup, "assert 1 FAILED (allowed + secret): expected HTTP 200, got %d\n%s", statusCode, strings.TrimSpace(out))
 	}
 	if !strings.Contains(out, "Bearer banshee") {
 		fatal(sup, "assert 1 FAILED: proxy did not inject the bound secret\nbody: %s", out)
@@ -125,23 +125,23 @@ func main() {
 	log.Printf("PASS  1 allowed upstream reachable, secret injected")
 	log.Printf("      upstream saw: %s", strings.TrimSpace(strings.ReplaceAll(out, "\n", " ")))
 
-	// 2. An unknown upstream is refused (default deny).
-	out, err = guestCurl(ctx, sup.client, node.Hostname, proxyURL, denied)
-	if err == nil && !strings.Contains(out, "403") {
-		fatal(sup, "assert 2 FAILED: un-allowed upstream was reachable\nbody: %s", out)
+	// 2. An unknown upstream is refused with the proxy's 403 (default deny).
+	out, statusCode = guestCurl(ctx, sup.client, node.Hostname, proxyURL, denied)
+	if statusCode != 403 {
+		fatal(sup, "assert 2 FAILED: expected proxy 403 for un-allowed upstream, got %d\n%s", statusCode, strings.TrimSpace(out))
 	}
-	log.Printf("PASS  2 un-allowed upstream refused by proxy")
+	log.Printf("PASS  2 un-allowed upstream refused by proxy (403)")
 
 	// 3. Revoking the rule blocks the previously-allowed upstream.
 	if err := sup.client.RemoveProxyAllow(ctx, "egress-filter", allowed.ip); err != nil {
 		fatal(sup, "remove allow rule: %v", err)
 	}
 	time.Sleep(300 * time.Millisecond)
-	out, err = guestCurl(ctx, sup.client, node.Hostname, proxyURL, allowed)
-	if err == nil && !strings.Contains(out, "403") {
-		fatal(sup, "assert 3 FAILED: upstream still reachable after revoke\nbody: %s", out)
+	out, statusCode = guestCurl(ctx, sup.client, node.Hostname, proxyURL, allowed)
+	if statusCode != 403 {
+		fatal(sup, "assert 3 FAILED: expected proxy 403 after revoke, got %d\n%s", statusCode, strings.TrimSpace(out))
 	}
-	log.Printf("PASS  3 revoked upstream refused after RemoveProxyAllow")
+	log.Printf("PASS  3 revoked upstream refused after RemoveProxyAllow (403)")
 
 	fmt.Println("All egress rules proved.")
 }
@@ -354,16 +354,31 @@ func configureProxy(ctx context.Context, c *slicer.SlicerClient, clientName stri
 	return created.Token, nil
 }
 
-// guestCurl runs curl inside the guest, proxying to targetURL, and returns its
-// combined output.
-func guestCurl(ctx context.Context, c *slicer.SlicerClient, hostname, proxyURL string, target *upstream) (string, error) {
+// guestCurl runs curl inside the guest, proxying to targetURL, and returns the
+// captured output and the emitted final HTTP status code (0 if curl got no
+// response). Unknown/revoked upstreams reach the proxy denial, so they surface
+// as a genuine proxy 403 rather than a transport error.
+func guestCurl(ctx context.Context, c *slicer.SlicerClient, hostname, proxyURL string, target *upstream) (string, int) {
 	cmd := c.Command(ctx, hostname, "curl", "-sS",
 		"-x", proxyURL,
 		"-w", "\nHTTP_STATUS:%{http_code}",
 		fmt.Sprintf("http://%s:%d/echo", target.ip, target.portNum))
 	cmd.Env = []string{"HTTP_PROXY=" + proxyURL, "HTTPS_PROXY=" + proxyURL}
-	out, err := cmd.CombinedOutput()
-	return string(out), err
+	out, _ := cmd.CombinedOutput()
+	s := string(out)
+	return s, parseHTTPStatus(s)
+}
+
+// parseHTTPStatus extracts the code from the "HTTP_STATUS:<code>" trailer curl
+// emits, defaulting to 0 when absent (i.e. curl got no HTTP response).
+func parseHTTPStatus(out string) int {
+	const marker = "HTTP_STATUS:"
+	if i := strings.LastIndex(out, marker); i >= 0 {
+		if code, err := strconv.Atoi(strings.TrimSpace(out[i+len(marker):])); err == nil {
+			return code
+		}
+	}
+	return 0
 }
 
 func waitForAPI(ctx context.Context, c *slicer.SlicerClient, timeout time.Duration) {

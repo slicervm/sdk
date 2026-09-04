@@ -15,10 +15,11 @@ then asserts on traffic from inside an isolated microVM.
 
 ## Run
 
-Requires a Slicer host (Firecracker + licence), e.g. in `tmux`:
+Requires a Slicer host (Firecracker + licence), e.g. in `tmux`. Run it from the
+SDK repo:
 
 ```bash
-sudo ./egress-filter --bin /usr/local/bin/slicer \
+go run ./examples/egress-filter --bin /usr/local/bin/slicer \
   --license-file /home/alex/.slicer/LICENSE
 ```
 
