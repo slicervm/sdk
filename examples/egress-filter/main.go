@@ -13,11 +13,16 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
 	slicer "github.com/slicervm/sdk"
 )
+
+// teardown is the active cleanup for an interrupt. It starts stop-only and is
+// replaced by the full cleanup (VM, upstreams, children) once those exist.
+var teardown atomic.Pointer[func()]
 
 // egress-filter is a single Go process that is the process supervisor for a real
 // Slicer daemon and its egress proxy. It boots both as child processes, then
@@ -67,6 +72,20 @@ func main() {
 	flag.BoolVar(&expose, "expose", false, "bind the (unauthenticated) dev daemon API to 0.0.0.0 so it can be inspected from other hosts")
 	flag.Parse()
 
+	// Install the interrupt handler before anything is created. The teardown
+	// becomes richer as resources come up (see below), so a Ctrl-C at any stage
+	// cleans up everything owned so far.
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sig
+		if f := teardown.Load(); f != nil {
+			(*f)()
+		}
+		log.Printf("interrupt received, tearing down")
+		os.Exit(0)
+	}()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
 	defer cancel()
 
@@ -77,6 +96,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("boot: %v", err)
 	}
+	// The daemon and proxy now exist; an interrupt can stop them even before
+	// the VM is created.
+	stopOnly := func() { sup.stop() }
+	teardown.Store(&stopOnly)
 	log.Printf("daemon API at %s:%d (workdir %s)", apiHost, apiPort, sup.workdir)
 
 	if localIP == "" {
@@ -130,17 +153,11 @@ func main() {
 	}
 	defer cleanup()
 
-	// A Ctrl-C/SIGTERM at any point must tear the stack down too, not just leave
-	// it for the -keep park: the process owns privileged child process groups and
-	// a VM.
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-sig
-		log.Printf("interrupt received, tearing down")
-		cleanup()
-		os.Exit(0)
-	}()
+	// A Ctrl-C/SIGTERM at any point must tear the stack down, not just during
+	// the -keep park. The handler is installed early (see main) and this stores
+	// the full teardown once the VM and upstreams exist; until then a stop-only
+	// teardown is active.
+	teardown.Store(&cleanup)
 
 	// The guest may only reach the gateway under the --drop 0.0.0.0/0 policy;
 	// the plaintext proxy data-plane listens there on 3128.
