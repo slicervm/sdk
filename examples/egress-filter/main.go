@@ -47,7 +47,11 @@ func main() {
 	)
 	flag.StringVar(&bin, "bin", envOr("SLICER_BIN", "slicer"), "path to the slicer binary")
 	flag.BoolVar(&sudo, "sudo", true, "prefix daemon and proxy commands with sudo")
-	flag.StringVar(&group, "group", "egress-filter", "host group name")
+	// Host group names max out at 12 chars for isolated networking (Firecracker
+	// interface limit: s{hostgroup}-{num}), so keep the default short even though
+	// the example is called egress-filter.
+	const defaultGroup = "egress"
+	flag.StringVar(&group, "group", defaultGroup, "host group name (max 12 chars for isolated networking)")
 	flag.StringVar(&storage, "storage", "devmapper", "storage backend for the host group (devmapper or image)")
 	flag.StringVar(&gateway, "gateway", defaultGateway, "isolated-network gateway IP the VM uses to reach the proxy")
 	flag.StringVar(&cidr, "cidr", "192.168.141.0/24", "isolated-network CIDR for the host group")
