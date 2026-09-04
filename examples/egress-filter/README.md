@@ -27,5 +27,7 @@ The binary boots the daemon and proxy as children it owns, configures the proxy
 via `CreateProxyClient` / `CreateProxySecret` / `AddProxyAllow`, runs the VM
 checks, then tears the whole stack down.
 
-`-keep` leaves the daemon up on `0.0.0.0:8080` for inspection; `-storage`,
-`-group` and `-api-port` are the main knobs.
+The dev daemon API binds to `127.0.0.1` by default. `-keep` leaves the daemon,
+proxy and VM up (parked until Ctrl-C) for inspection; pass `-expose` to also
+bind the unauthenticated API to `0.0.0.0:<api-port>` for inspection from other
+hosts. `-storage`, `-group` and `-api-port` are the other main knobs.

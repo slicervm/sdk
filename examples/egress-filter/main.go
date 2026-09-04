@@ -29,9 +29,10 @@ import (
 //   - revoking the allow rule blocks the previously-allowed upstream
 //
 // Run it on the host that will run the daemon (e.g. a Slicer box). The daemon
-// is exposed over 0.0.0.0:<api-port> so it can be poked from elsewhere; on
-// exit the supervisor tears down the VM, the proxy client, and its child
-// daemon/proxy processes. --keep leaves them running for debugging.
+// API binds to 127.0.0.1 by default; pass -expose to open it on 0.0.0.0:<api-port>
+// so it can be inspected from elsewhere. On exit the supervisor tears down the
+// VM, the proxy client, and its child daemon/proxy processes. --keep leaves the
+// whole stack running for debugging until a signal is received.
 
 func main() {
 	var (
@@ -46,6 +47,7 @@ func main() {
 		apiHost string
 		license string
 		localIP string
+		expose  bool
 	)
 	flag.StringVar(&bin, "bin", envOr("SLICER_BIN", "slicer"), "path to the slicer binary")
 	flag.BoolVar(&sudo, "sudo", true, "prefix daemon and proxy commands with sudo")
@@ -57,11 +59,12 @@ func main() {
 	flag.StringVar(&storage, "storage", "devmapper", "storage backend for the host group (devmapper or image)")
 	flag.StringVar(&gateway, "gateway", defaultGateway, "isolated-network gateway IP the VM uses to reach the proxy")
 	flag.StringVar(&cidr, "cidr", "192.168.141.0/24", "isolated-network CIDR for the host group")
-	flag.BoolVar(&keep, "keep", false, "leave the daemon, proxy and VM running on exit")
+	flag.BoolVar(&keep, "keep", false, "leave the daemon, proxy and VM running after passing; Ctrl-C tears down")
 	flag.IntVar(&apiPort, "api-port", 8080, "TCP API port the daemon listens on")
 	flag.StringVar(&apiHost, "api-host", "127.0.0.1", "address the local SDK client uses to reach the daemon")
 	flag.StringVar(&license, "license-file", "", "path to the slicer license file")
 	flag.StringVar(&localIP, "local-ip", "", "this host's LAN IP (auto-detected if empty)")
+	flag.BoolVar(&expose, "expose", false, "bind the (unauthenticated) dev daemon API to 0.0.0.0 so it can be inspected from other hosts")
 	flag.Parse()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
@@ -69,7 +72,7 @@ func main() {
 
 	sup, err := boot(ctx, supervisorConfig{
 		bin: bin, sudo: sudo, group: group, storage: storage, gateway: gateway, cidr: cidr,
-		apiPort: apiPort, apiHost: apiHost, licenseFile: license,
+		apiPort: apiPort, apiHost: apiHost, licenseFile: license, expose: expose,
 	})
 	if err != nil {
 		log.Fatalf("boot: %v", err)
@@ -163,7 +166,7 @@ func main() {
 	fmt.Println("All egress rules proved.")
 
 	if keep {
-		log.Printf("-keep set: leaving VM %s, proxy config and daemon up for inspection (API 0.0.0.0:%d); Ctrl-C/SIGTERM tears the stack down", node.Hostname, apiPort)
+		log.Printf("-keep set: leaving VM %s, proxy config and daemon up for inspection (API %s:%d); Ctrl-C/SIGTERM tears the stack down", node.Hostname, sup.cfg.apiBind(), apiPort)
 		waitForSignal(cleanup)
 	}
 }
@@ -231,7 +234,16 @@ func newCmd(cfg supervisorConfig, args ...string) *exec.Cmd {
 type supervisorConfig struct {
 	bin, group, storage, gateway, cidr, apiHost, licenseFile string
 	apiPort                                                  int
-	sudo                                                     bool
+	sudo, expose                                             bool
+}
+
+// apiBind returns the daemon's API bind address: loopback by default, all
+// interfaces only when explicitly requested, since the dev API is unauthenticated.
+func (c supervisorConfig) apiBind() string {
+	if c.expose {
+		return "0.0.0.0"
+	}
+	return "127.0.0.1"
 }
 
 // supervisor owns the child processes that run the daemon and proxy, so one Go
@@ -274,7 +286,7 @@ func boot(ctx context.Context, cfg supervisorConfig) (*supervisor, error) {
 		"--find-ssh-keys=false",
 		"--storage", cfg.storage,
 		"--cpu", "1", "--ram=1",
-		"--api-bind", "0.0.0.0",
+		"--api-bind", cfg.apiBind(),
 		"--api-port", strconv.Itoa(cfg.apiPort),
 	}...)
 	yaml, err := exec.CommandContext(ctx, cfg.bin, newArgs...).Output()
