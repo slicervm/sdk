@@ -160,7 +160,10 @@ func main() {
 	teardown.Store(&cleanup)
 
 	// The guest may only reach the gateway under the --drop 0.0.0.0/0 policy;
-	// the plaintext proxy data-plane listens there on 3128.
+	// the plaintext proxy data-plane listens there on 3128 (per `slicer proxy up
+	// --help`: HTTP_PROXY=http://...:3128 is plaintext, HTTPS_PROXY=https://...:3129
+	// is the outer-TLS port). The upstreams here are plain HTTP, so use the
+	// plaintext listener.
 	proxyURL := "http://:" + clientToken + "@" + gateway + ":3128"
 
 	// 1. Allowed upstream returns 200 and carries the injected credential.
