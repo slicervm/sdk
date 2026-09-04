@@ -112,6 +112,7 @@ func main() {
 		fatal(sup, "create VM: %v", err)
 	}
 	log.Printf("VM %s ready (ip=%s)", node.Hostname, node.IP)
+	sup.vm = node.Hostname
 	defer func() { _, _ = sup.client.DeleteVM(ctx, group, node.Hostname) }()
 
 	// The guest may only reach the gateway under the --drop 0.0.0.0/0 policy;
@@ -150,10 +151,14 @@ func main() {
 	fmt.Println("All egress rules proved.")
 }
 
-// fatal logs, tears the supervised stack down, then exits.
+// fatal logs, deletes any created VM, tears the supervised stack down, then
+// exits. It deletes the VM explicitly because os.Exit bypasses defers.
 func fatal(sup *supervisor, format string, a ...any) {
 	log.Printf(format, a...)
 	if sup != nil {
+		if sup.vm != "" && sup.client != nil {
+			_, _ = sup.client.DeleteVM(context.Background(), sup.cfg.group, sup.vm)
+		}
 		sup.stop()
 	}
 	os.Exit(1)
@@ -196,6 +201,7 @@ type supervisor struct {
 	cfg     supervisorConfig
 	workdir string
 	client  *slicer.SlicerClient
+	vm      string
 	daemon  *exec.Cmd
 	proxy   *exec.Cmd
 }
