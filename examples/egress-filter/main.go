@@ -354,15 +354,6 @@ func boot(ctx context.Context, cfg supervisorConfig) (*supervisor, error) {
 	}
 	sup.proxy = proxy
 
-	go func() {
-		_ = daemon.Wait()
-		log.Printf("supervisor: daemon child exited")
-	}()
-	go func() {
-		_ = proxy.Wait()
-		log.Printf("supervisor: proxy child exited")
-	}()
-
 	sup.client = slicer.NewSlicerClient(fmt.Sprintf("http://%s:%d", cfg.apiHost, cfg.apiPort), "", "slicer-sdk-egress-filter", nil)
 	waitForAPI(ctx, sup.client, 90*time.Second)
 	ok = true
