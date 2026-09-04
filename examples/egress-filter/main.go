@@ -117,7 +117,9 @@ func main() {
 	log.Printf("VM %s ready (ip=%s)", node.Hostname, node.IP)
 	sup.vm = node.Hostname
 
-	// One teardown path, gated on !keep so -keep preserves the whole stack.
+	// One teardown path. Registered unconditionally (idempotent): for -keep it
+	// still runs only after the park block returns, so the stack stays up until
+	// a signal, and an early failure or Ctrl-C still cleans everything up.
 	cleanup := func() {
 		if sup.vm != "" {
 			_, _ = sup.client.DeleteVM(context.Background(), group, sup.vm)
@@ -126,9 +128,7 @@ func main() {
 		denied.Close()
 		sup.stop()
 	}
-	if !keep {
-		defer cleanup()
-	}
+	defer cleanup()
 
 	// The guest may only reach the gateway under the --drop 0.0.0.0/0 policy;
 	// the plaintext proxy data-plane listens there on 3128.
@@ -267,6 +267,12 @@ func boot(ctx context.Context, cfg supervisorConfig) (*supervisor, error) {
 		return nil, err
 	}
 	sup.workdir = workdir
+	ok := false
+	defer func() {
+		if !ok {
+			_ = os.RemoveAll(workdir)
+		}
+	}()
 
 	license := []string{}
 	if cfg.licenseFile != "" {
@@ -336,6 +342,7 @@ func boot(ctx context.Context, cfg supervisorConfig) (*supervisor, error) {
 
 	sup.client = slicer.NewSlicerClient(fmt.Sprintf("http://%s:%d", cfg.apiHost, cfg.apiPort), "", "slicer-sdk-egress-filter", nil)
 	waitForAPI(ctx, sup.client, 90*time.Second)
+	ok = true
 	return sup, nil
 }
 
