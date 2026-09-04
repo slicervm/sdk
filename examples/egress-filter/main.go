@@ -144,8 +144,14 @@ func main() {
 	// still runs only after the park block returns, so the stack stays up until
 	// a signal, and an early failure or Ctrl-C still cleans everything up.
 	cleanup := func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		// Everything the example created through the SDK is revoked on the way
+		// out: the proxy client, its secret, and the VM.
+		_ = sup.client.DeleteProxyClient(cleanupCtx, "egress-filter")
+		_ = sup.client.DeleteProxySecret(cleanupCtx, "banshee")
 		if sup.vm != "" {
-			_, _ = sup.client.DeleteVM(context.Background(), group, sup.vm)
+			_, _ = sup.client.DeleteVM(cleanupCtx, group, sup.vm)
 		}
 		allowed.Close()
 		denied.Close()
@@ -203,12 +209,15 @@ func main() {
 	}
 }
 
-// fatal logs, deletes any created VM, tears the supervised stack down, then
-// exits. It deletes the VM explicitly because os.Exit bypasses defers.
+// fatal logs, deletes the SDK-created resources (proxy client, secret, VM),
+// tears the supervised stack down, then exits. os.Exit bypasses defers, so it
+// cleans up explicitly.
 func fatal(sup *supervisor, format string, a ...any) {
 	log.Printf(format, a...)
-	if sup != nil {
-		if sup.vm != "" && sup.client != nil {
+	if sup != nil && sup.client != nil {
+		_ = sup.client.DeleteProxyClient(context.Background(), "egress-filter")
+		_ = sup.client.DeleteProxySecret(context.Background(), "banshee")
+		if sup.vm != "" {
 			_, _ = sup.client.DeleteVM(context.Background(), sup.cfg.group, sup.vm)
 		}
 		sup.stop()
