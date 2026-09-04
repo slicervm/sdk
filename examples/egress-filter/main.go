@@ -130,6 +130,18 @@ func main() {
 	}
 	defer cleanup()
 
+	// A Ctrl-C/SIGTERM at any point must tear the stack down too, not just leave
+	// it for the -keep park: the process owns privileged child process groups and
+	// a VM.
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-sig
+		log.Printf("interrupt received, tearing down")
+		cleanup()
+		os.Exit(0)
+	}()
+
 	// The guest may only reach the gateway under the --drop 0.0.0.0/0 policy;
 	// the plaintext proxy data-plane listens there on 3128.
 	proxyURL := "http://:" + clientToken + "@" + gateway + ":3128"
@@ -167,7 +179,7 @@ func main() {
 
 	if keep {
 		log.Printf("-keep set: leaving VM %s, proxy config and daemon up for inspection (API %s:%d); Ctrl-C/SIGTERM tears the stack down", node.Hostname, sup.cfg.apiBind(), apiPort)
-		waitForSignal(cleanup)
+		select {} // park; the interrupt handler tears the stack down
 	}
 }
 
@@ -182,15 +194,6 @@ func fatal(sup *supervisor, format string, a ...any) {
 		sup.stop()
 	}
 	os.Exit(1)
-}
-
-// waitForSignal parks the supervisor until SIGINT/SIGTERM, then runs the
-// cleanup. Used by -keep so the stack can be inspected before tearing down.
-func waitForSignal(cleanup func()) {
-	sig := make(chan os.Signal, 1)
-	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
-	<-sig
-	cleanup()
 }
 
 // retry runs fn, retrying on any error with backoff for up to timeout.
