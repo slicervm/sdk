@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -175,8 +176,13 @@ func main() {
 	// the plaintext proxy data-plane listens there on 3128 (per `slicer proxy up
 	// --help`: HTTP_PROXY=http://...:3128 is plaintext, HTTPS_PROXY=https://...:3129
 	// is the outer-TLS port). The upstreams here are plain HTTP, so use the
-	// plaintext listener.
-	proxyURL := "http://:" + clientToken + "@" + gateway + ":3128"
+	// plaintext listener. Build via url.URL so the minted token is percent-encoded
+	// rather than naively interpolated into the userinfo.
+	proxyURL := (&url.URL{
+		Scheme: "http",
+		User:   url.UserPassword("", clientToken),
+		Host:   net.JoinHostPort(gateway, strconv.Itoa(3128)),
+	}).String()
 
 	// 1. Allowed upstream returns 200 and carries the injected credential.
 	out, statusCode := guestCurl(ctx, sup.client, node.Hostname, proxyURL, allowed)
@@ -377,7 +383,11 @@ func boot(ctx context.Context, cfg supervisorConfig) (*supervisor, error) {
 	sup.proxy = proxy
 
 	sup.client = slicer.NewSlicerClient(fmt.Sprintf("http://%s:%d", cfg.apiHost, cfg.apiPort), "", "slicer-sdk-egress-filter", nil)
-	waitForAPI(ctx, sup.client, 90*time.Second)
+	if err := waitForAPI(ctx, sup.client, 90*time.Second); err != nil {
+		sup.signalGroup(sup.daemon)
+		sup.signalGroup(sup.proxy)
+		return nil, err
+	}
 	ok = true
 	return sup, nil
 }
@@ -497,14 +507,20 @@ func parseHTTPStatus(out string) int {
 	return 0
 }
 
-func waitForAPI(ctx context.Context, c *slicer.SlicerClient, timeout time.Duration) {
+// waitForAPI polls the daemon info endpoint until the API is reachable, or
+// returns an error after timeout so boot fails fast instead of reporting
+// success against a daemon that never came up.
+func waitForAPI(ctx context.Context, c *slicer.SlicerClient, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
+	var lastErr error
 	for {
 		if _, err := c.GetInfo(ctx); err == nil {
-			return
+			return nil
+		} else {
+			lastErr = err
 		}
 		if time.Now().After(deadline) {
-			return
+			return fmt.Errorf("daemon API not ready within %s: %w", timeout, lastErr)
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
