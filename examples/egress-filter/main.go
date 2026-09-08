@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -76,7 +77,6 @@ func main() {
 	// becomes richer as resources come up (see below), so a Ctrl-C at any stage
 	// cleans up everything owned so far.
 	sig := make(chan os.Signal, 1)
-	stop := make(chan struct{}) // closed by the handler once teardown is done
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-sig
@@ -84,7 +84,6 @@ func main() {
 			(*f)()
 		}
 		log.Printf("interrupt received, tearing down")
-		close(stop)
 		os.Exit(0)
 	}()
 
@@ -142,9 +141,9 @@ func main() {
 	log.Printf("VM %s ready (ip=%s)", node.Hostname, node.IP)
 	sup.vm = node.Hostname
 
-	// One teardown path. Registered unconditionally (idempotent): for -keep it
-	// still runs only after the park block returns, so the stack stays up until
-	// a signal, and an early failure or Ctrl-C still cleans everything up.
+	// One teardown path, guarded so it runs exactly once no matter how many of
+	// the interrupt handler, the deferred call, and fatal fire it. -keep parks on
+	// done, which is closed only after the single teardown completes.
 	cleanup := func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -159,13 +158,18 @@ func main() {
 		denied.Close()
 		sup.stop()
 	}
-	defer cleanup()
-
-	// A Ctrl-C/SIGTERM at any point must tear the stack down, not just during
-	// the -keep park. The handler is installed early (see main) and this stores
-	// the full teardown once the VM and upstreams exist; until then a stop-only
-	// teardown is active.
-	teardown.Store(&cleanup)
+	var once sync.Once
+	done := make(chan struct{})
+	runCleanup := func() {
+		once.Do(func() {
+			cleanup()
+			close(done)
+		})
+	}
+	// Until the VM exists a stop-only teardown (set after boot) is active; from
+	// here on the full once-guarded teardown is in place.
+	teardown.Store(&runCleanup)
+	defer runCleanup()
 
 	// The guest may only reach the gateway under the --drop 0.0.0.0/0 policy;
 	// the plaintext proxy data-plane listens there on 3128 (per `slicer proxy up
@@ -207,27 +211,21 @@ func main() {
 
 	if keep {
 		log.Printf("-keep set: leaving VM %s, proxy config and daemon up for inspection (API %s:%d); Ctrl-C/SIGTERM tears the stack down", node.Hostname, sup.cfg.apiBind(), apiPort)
-		<-stop // park until the interrupt handler tears the stack down
+		<-done // park until the single teardown completes
 	}
 }
 
-// fatal logs a best-effort API teardown, then always stops the supervised stack
-// before exiting. os.Exit bypasses defers, so it cleans up explicitly. The API
-// calls are bounded so a stuck daemon cannot prevent us from stopping the child
+// fatal logs, runs the once-guarded teardown (bounded API cleanup followed by
+// stopping the supervised children), then exits. os.Exit bypasses defers and
+// the teardown is routed through the shared once so it cannot race the handler
+// or the deferred path. A hung daemon cannot prevent us from stopping the child
 // processes this supervisor owns.
 func fatal(sup *supervisor, format string, a ...any) {
 	log.Printf(format, a...)
 	if sup != nil {
-		if sup.client != nil {
-			bctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			_ = sup.client.DeleteProxyClient(bctx, "egress-filter")
-			_ = sup.client.DeleteProxySecret(bctx, "banshee")
-			if sup.vm != "" {
-				_, _ = sup.client.DeleteVM(bctx, sup.cfg.group, sup.vm)
-			}
-			cancel()
+		if f := teardown.Load(); f != nil {
+			(*f)()
 		}
-		sup.stop() // always; API cleanup is best-effort
 	}
 	os.Exit(1)
 }
