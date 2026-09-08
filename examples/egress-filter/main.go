@@ -433,7 +433,7 @@ func startUpstream(ip, tag string) (*upstream, error) {
 	mux.HandleFunc("/echo", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Fprintf(w, "hosttag=%s\nauth=%s\n", tag, r.Header.Get("Authorization"))
 	})
-	ln, err := net.Listen("tcp", ip+":0")
+	ln, err := net.Listen("tcp", net.JoinHostPort(ip, "0"))
 	if err != nil {
 		return nil, err
 	}
@@ -488,7 +488,7 @@ func guestCurl(ctx context.Context, c *slicer.SlicerClient, hostname, proxyURL s
 	cmd := c.Command(ctx, hostname, "curl", "-sS",
 		"-x", proxyURL,
 		"-w", "\nHTTP_STATUS:%{http_code}",
-		fmt.Sprintf("http://%s:%d/echo", target.ip, target.portNum))
+		"http://"+net.JoinHostPort(target.ip, strconv.Itoa(target.portNum))+"/echo")
 	cmd.Env = []string{"HTTP_PROXY=" + proxyURL, "HTTPS_PROXY=" + proxyURL}
 	out, _ := cmd.CombinedOutput()
 	s := string(out)
