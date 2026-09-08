@@ -76,6 +76,7 @@ func main() {
 	// becomes richer as resources come up (see below), so a Ctrl-C at any stage
 	// cleans up everything owned so far.
 	sig := make(chan os.Signal, 1)
+	stop := make(chan struct{}) // closed by the handler once teardown is done
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-sig
@@ -83,6 +84,7 @@ func main() {
 			(*f)()
 		}
 		log.Printf("interrupt received, tearing down")
+		close(stop)
 		os.Exit(0)
 	}()
 
@@ -205,22 +207,27 @@ func main() {
 
 	if keep {
 		log.Printf("-keep set: leaving VM %s, proxy config and daemon up for inspection (API %s:%d); Ctrl-C/SIGTERM tears the stack down", node.Hostname, sup.cfg.apiBind(), apiPort)
-		select {} // park; the interrupt handler tears the stack down
+		<-stop // park until the interrupt handler tears the stack down
 	}
 }
 
-// fatal logs, deletes the SDK-created resources (proxy client, secret, VM),
-// tears the supervised stack down, then exits. os.Exit bypasses defers, so it
-// cleans up explicitly.
+// fatal logs a best-effort API teardown, then always stops the supervised stack
+// before exiting. os.Exit bypasses defers, so it cleans up explicitly. The API
+// calls are bounded so a stuck daemon cannot prevent us from stopping the child
+// processes this supervisor owns.
 func fatal(sup *supervisor, format string, a ...any) {
 	log.Printf(format, a...)
-	if sup != nil && sup.client != nil {
-		_ = sup.client.DeleteProxyClient(context.Background(), "egress-filter")
-		_ = sup.client.DeleteProxySecret(context.Background(), "banshee")
-		if sup.vm != "" {
-			_, _ = sup.client.DeleteVM(context.Background(), sup.cfg.group, sup.vm)
+	if sup != nil {
+		if sup.client != nil {
+			bctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_ = sup.client.DeleteProxyClient(bctx, "egress-filter")
+			_ = sup.client.DeleteProxySecret(bctx, "banshee")
+			if sup.vm != "" {
+				_, _ = sup.client.DeleteVM(bctx, sup.cfg.group, sup.vm)
+			}
+			cancel()
 		}
-		sup.stop()
+		sup.stop() // always; API cleanup is best-effort
 	}
 	os.Exit(1)
 }
