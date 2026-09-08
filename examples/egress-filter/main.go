@@ -140,7 +140,6 @@ func main() {
 		fatal(sup, "create VM: %v", err)
 	}
 	log.Printf("VM %s ready (ip=%s)", node.Hostname, node.IP)
-	sup.vm = node.Hostname
 
 	// One teardown path, guarded so it runs exactly once no matter how many of
 	// the interrupt handler, the deferred call, and fatal fire it. -keep parks on
@@ -149,11 +148,14 @@ func main() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		// Everything the example created through the SDK is revoked on the way
-		// out: the proxy client, its secret, and the VM.
+		// out: the proxy client, its secret, and every VM tagged for this run
+		// (delete by tag so even a VM leaked by a retried create is removed).
 		_ = sup.client.DeleteProxyClient(cleanupCtx, "egress-filter")
 		_ = sup.client.DeleteProxySecret(cleanupCtx, "banshee")
-		if sup.vm != "" {
-			_, _ = sup.client.DeleteVM(cleanupCtx, group, sup.vm)
+		if nodes, err := sup.client.ListVMs(cleanupCtx, slicer.ListOptions{Tag: "example=egress-filter"}); err == nil {
+			for _, n := range nodes {
+				_, _ = sup.client.DeleteVM(cleanupCtx, group, n.Hostname)
+			}
 		}
 		allowed.Close()
 		denied.Close()
@@ -298,7 +300,6 @@ type supervisor struct {
 	cfg     supervisorConfig
 	workdir string
 	client  *slicer.SlicerClient
-	vm      string
 	daemon  *exec.Cmd
 	proxy   *exec.Cmd
 }
