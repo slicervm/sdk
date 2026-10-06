@@ -410,3 +410,18 @@ Notes:
 * The API uses canonical hostnames for VM endpoints. A CLI-friendly name is the ordinary, unique `name=<value>` tag: resolve it with `ListVMs(ctx, ListOptions{Tag: "name=<value>"})`, require one match, then pass that result's `Hostname` to VM methods.
 
 See a more minimal example at: [examples/create/main.go](examples/create/main.go)
+
+## Stop a standalone daemon
+
+Use the daemon's known URL or Unix socket; no host PID lookup is needed.
+
+```go
+client := slicer.NewSlicerClient("/absolute/path/to/private/slicer.sock", token, "my-agent", nil)
+if err := client.ShutdownDaemon(ctx); err != nil {
+    return err
+}
+```
+
+The call returns when `POST /daemon/shutdown` is accepted. Cleanup follows
+the daemon's configured shutdown/suspend policy, preserving persistent VM
+restart intention. A supervisor may restart the daemon, just as after SIGTERM.
