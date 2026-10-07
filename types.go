@@ -272,6 +272,9 @@ type SlicerForkVMNetworkPolicy struct {
 }
 
 type SlicerCommitVMOptions struct {
+	// Mode selects a stopped disk commit or a live memory checkpoint.
+	// Empty preserves the default disk commit behaviour.
+	Mode     string            `json:"mode,omitempty"`
 	Tags     []string          `json:"tags,omitempty"`
 	Labels   map[string]string `json:"labels,omitempty"`
 	CacheKey string            `json:"cache_key,omitempty"`

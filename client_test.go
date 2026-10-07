@@ -559,3 +559,29 @@ func TestVMTagsReturnsAPIError(t *testing.T) {
 		t.Fatalf("unexpected request details: %#v", apiErr)
 	}
 }
+
+func TestMemoryCommitSendsModeWithoutMetadata(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/vm/demo-1/commit" {
+			t.Errorf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+		}
+		if request["mode"] != "memory" {
+			t.Errorf("mode = %v", request["mode"])
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"commit_id":"cmt-demo-memory","mode":"memory"}`)
+	}))
+	defer server.Close()
+	client := NewSlicerClient(server.URL, "", "test", nil)
+	commit, err := client.CommitVMWithOptions(context.Background(), "demo-1", SlicerCommitVMOptions{Mode: "memory"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if commit.Mode != "memory" {
+		t.Fatalf("mode = %q", commit.Mode)
+	}
+}

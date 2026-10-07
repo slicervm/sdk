@@ -1552,7 +1552,7 @@ func (c *SlicerClient) CommitVMWithOptions(ctx context.Context, hostname string,
 
 	var reqBody io.Reader
 	opts.CacheKey = strings.TrimSpace(opts.CacheKey)
-	if len(opts.Tags) > 0 || len(opts.Labels) > 0 || opts.CacheKey != "" {
+	if opts.Mode != "" || len(opts.Tags) > 0 || len(opts.Labels) > 0 || opts.CacheKey != "" {
 		payload, err := json.Marshal(opts)
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal request: %w", err)
