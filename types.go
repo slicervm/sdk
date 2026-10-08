@@ -22,7 +22,7 @@ type SlicerNode struct {
 	// agent-facing operation (exec, shell, cp, forward) against the VM. It
 	// records the most recent use, not liveness: an operation that started
 	// earlier and is still running does not refresh it.
-	LastAgentCall time.Time `json:"last_agent_call,omitempty"`
+	LastAgentCall time.Time `json:"last_agent_call,omitempty,omitzero"`
 	Arch          string    `json:"arch,omitempty"`
 	Tags          []string  `json:"tags,omitempty"`
 	Status        string    `json:"status,omitempty"` // "Running", "Paused", or "Stopped"
@@ -98,8 +98,10 @@ type SlicerVMDescription struct {
 	// attached; check what is running before shutting the daemon down.
 	OpenAgentConnections int64 `json:"open_agent_connections"`
 	// BgExecs lists background execs known to the guest agent registry at
-	// describe time. Omitted when the agent is unreachable.
-	BgExecs []SlicerBgExecSummary `json:"bg_execs,omitempty"`
+	// describe time. nil (omitted on the wire) means the agent was
+	// unreachable or the query failed; a non-nil empty slice encodes as
+	// [] and means the registry was queried and has no jobs.
+	BgExecs []SlicerBgExecSummary `json:"bg_execs,omitzero"`
 }
 
 // SlicerBgExecSummary is one background exec as reported by the guest agent.
