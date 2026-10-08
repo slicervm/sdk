@@ -12,16 +12,21 @@ const NonRootUser = uint32(math.MaxUint32)
 
 // SlicerNode represents a node managed by the slicer REST API.
 type SlicerNode struct {
-	Hostname   string    `json:"hostname"`
-	HostGroup  string    `json:"hostgroup,omitempty"`
-	IP         string    `json:"ip"`
-	RamBytes   int64     `json:"ram_bytes,omitempty"` // RAM size in bytes
-	CPUs       int       `json:"cpus,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-	Arch       string    `json:"arch,omitempty"`
-	Tags       []string  `json:"tags,omitempty"`
-	Status     string    `json:"status,omitempty"` // "Running", "Paused", or "Stopped"
-	Persistent bool      `json:"persistent,omitempty"`
+	Hostname  string    `json:"hostname"`
+	HostGroup string    `json:"hostgroup,omitempty"`
+	IP        string    `json:"ip"`
+	RamBytes  int64     `json:"ram_bytes,omitempty"` // RAM size in bytes
+	CPUs      int       `json:"cpus,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	// LastAgentCall is the time of the last accepted initiation of an
+	// agent-facing operation (exec, shell, cp, forward) against the VM. It
+	// records the most recent use, not liveness: an operation that started
+	// earlier and is still running does not refresh it.
+	LastAgentCall time.Time `json:"last_agent_call,omitempty"`
+	Arch          string    `json:"arch,omitempty"`
+	Tags          []string  `json:"tags,omitempty"`
+	Status        string    `json:"status,omitempty"` // "Running", "Paused", or "Stopped"
+	Persistent    bool      `json:"persistent,omitempty"`
 }
 
 // SlicerVMTags is the mutable metadata tag state for a VM.
@@ -88,6 +93,23 @@ type SlicerVMDescription struct {
 	CommitID       string                     `json:"commit_id,omitempty"`
 	ParentCommitID string                     `json:"parent_commit_id,omitempty"`
 	Network        SlicerVMNetworkDescription `json:"network"`
+	// OpenAgentConnections counts live agent-facing connections (exec, shell,
+	// cp, forward) the daemon is proxying. Non-zero means something is
+	// attached; check what is running before shutting the daemon down.
+	OpenAgentConnections int64 `json:"open_agent_connections"`
+	// BgExecs lists background execs known to the guest agent registry at
+	// describe time. Omitted when the agent is unreachable.
+	BgExecs []SlicerBgExecSummary `json:"bg_execs,omitempty"`
+}
+
+// SlicerBgExecSummary is one background exec as reported by the guest agent.
+type SlicerBgExecSummary struct {
+	ExecID    string     `json:"exec_id"`
+	Command   string     `json:"command,omitempty"`
+	PID       int        `json:"pid,omitempty"`
+	State     string     `json:"state,omitempty"`
+	StartedAt *time.Time `json:"started_at,omitempty"`
+	ExitCode  *int       `json:"exit_code,omitempty"`
 }
 
 // SlicerVMNetworkDescription explains policy inheritance for one VM.
