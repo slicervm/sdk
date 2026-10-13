@@ -1162,12 +1162,22 @@ func (c *SlicerClient) updateVMTags(ctx context.Context, method, hostname string
 
 // DeleteVM deletes a VM from a host group
 func (c *SlicerClient) DeleteVM(ctx context.Context, groupName, hostname string) (*SlicerDeleteResponse, error) {
+	return c.DeleteVMWithOptions(ctx, groupName, hostname, nil)
+}
+
+// DeleteVMWithOptions deletes a VM from a host group with per-request options.
+func (c *SlicerClient) DeleteVMWithOptions(ctx context.Context, groupName, hostname string, options *SlicerDeleteOptions) (*SlicerDeleteResponse, error) {
 	u, err := url.Parse(c.baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse API URL: %w", err)
 	}
 
 	u.Path = fmt.Sprintf("/hostgroup/%s/nodes/%s", groupName, hostname)
+	if options != nil && options.Force {
+		q := u.Query()
+		q.Set("force", "true")
+		u.RawQuery = q.Encode()
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, u.String(), nil)
 	if err != nil {
@@ -1195,7 +1205,7 @@ func (c *SlicerClient) DeleteVM(ctx context.Context, groupName, hostname string)
 	}
 
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("status %s: %s", res.Status, strings.TrimSpace(string(body)))
+		return nil, newAPIError(res, body)
 	}
 
 	var delResp SlicerDeleteResponse
@@ -1320,6 +1330,9 @@ func (c *SlicerClient) Shutdown(ctx context.Context, hostname string, request *S
 	// Add action as query parameter
 	q := url.Values{}
 	q.Set("action", action)
+	if request != nil && request.Force {
+		q.Set("force", "true")
+	}
 	u.RawQuery = q.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), nil)
@@ -1348,7 +1361,7 @@ func (c *SlicerClient) Shutdown(ctx context.Context, hostname string, request *S
 	}
 
 	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("status %s: %s", res.Status, strings.TrimSpace(string(body)))
+		return newAPIError(res, body)
 	}
 
 	return nil
@@ -1389,7 +1402,7 @@ func (c *SlicerClient) PauseVM(ctx context.Context, hostname string) error {
 	}
 
 	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("status %s: %s", res.Status, strings.TrimSpace(string(body)))
+		return newAPIError(res, body)
 	}
 
 	return nil
@@ -1430,7 +1443,7 @@ func (c *SlicerClient) ResumeVM(ctx context.Context, hostname string) error {
 	}
 
 	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("status %s: %s", res.Status, strings.TrimSpace(string(body)))
+		return newAPIError(res, body)
 	}
 
 	return nil
@@ -1471,7 +1484,7 @@ func (c *SlicerClient) SuspendVM(ctx context.Context, hostname string) error {
 	}
 
 	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("status %s: %s", res.Status, strings.TrimSpace(string(body)))
+		return newAPIError(res, body)
 	}
 
 	return nil
@@ -1532,7 +1545,7 @@ func (c *SlicerClient) RestoreVMWithOptions(ctx context.Context, hostname string
 	}
 
 	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("status %s: %s", res.Status, strings.TrimSpace(string(body)))
+		return newAPIError(res, body)
 	}
 
 	return nil
@@ -1568,7 +1581,7 @@ func (c *SlicerClient) CommitVMWithOptions(ctx context.Context, hostname string,
 		return nil, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("status %s: %s", res.Status, strings.TrimSpace(string(body)))
+		return nil, newAPIError(res, body)
 	}
 	var out SlicerCommitVMResponse
 	if err := json.Unmarshal(body, &out); err != nil {
@@ -1608,7 +1621,7 @@ func (c *SlicerClient) ListCommits(ctx context.Context, opts SlicerCommitListOpt
 		return nil, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("status %s: %s", res.Status, strings.TrimSpace(string(body)))
+		return nil, newAPIError(res, body)
 	}
 	var out []SlicerCommitInfo
 	if err := json.Unmarshal(body, &out); err != nil {
@@ -1636,7 +1649,7 @@ func (c *SlicerClient) DeleteCommit(ctx context.Context, commitID string) (*Slic
 		return nil, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("status %s: %s", res.Status, strings.TrimSpace(string(body)))
+		return nil, newAPIError(res, body)
 	}
 	var out SlicerCommitDeleteResponse
 	if err := json.Unmarshal(body, &out); err != nil {
@@ -1717,7 +1730,7 @@ func (c *SlicerClient) ForkCommittedVM(ctx context.Context, commitID string, opt
 		return nil, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("status %s: %s", res.Status, strings.TrimSpace(string(body)))
+		return nil, newAPIError(res, body)
 	}
 	var out SlicerForkVMResponse
 	if err := json.Unmarshal(body, &out); err != nil {
