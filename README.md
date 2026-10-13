@@ -129,6 +129,7 @@ When you want to host a "Service" or run a server, such as a Kubernetes cluster,
 | `CreateVMWithOptions(ctx, groupName, request, options)` | Create a new VM with typed query options. Set `SlicerCreateNodeOptions.Wait` to `SlicerCreateNodeWaitAgent` or `SlicerCreateNodeWaitUserdata` with an optional `Timeout` to block server-side until readiness. | `ctx` (context.Context), `groupName` (string), `request` (SlicerCreateNodeRequest), `options` (SlicerCreateNodeOptions) | (*SlicerCreateNodeResponse, error) |
 | `RelaunchVM(ctx, hostname)` | Relaunch a known stopped persistent VM (re-uses its disk image). | `ctx` (context.Context), `hostname` (string) | (*SlicerCreateNodeResponse, error) |
 | `DeleteVM(ctx, groupName, hostname)` | Delete a VM from a host group | `ctx` (context.Context), `groupName` (string), `hostname` (string) | (*SlicerDeleteResponse, error) |
+| `DeleteVMWithOptions(ctx, groupName, hostname, options)` | Delete a VM, optionally stopping its VMM forcefully | `ctx` (context.Context), `groupName` (string), `hostname` (string), `options` (*SlicerDeleteOptions) | (*SlicerDeleteResponse, error) |
 | `ListVMs(ctx, opts...)` | List all VMs across all host groups. Pass an optional `ListOptions{Tag: "…"}` or `ListOptions{TagPrefix: "…"}` to filter server-side. | `ctx` (context.Context), `opts` (...ListOptions) | ([]SlicerNode, error) |
 | `GetHostGroups(ctx)` | Fetch all host groups | `ctx` (context.Context) | ([]SlicerHostGroup, error) |
 | `GetHostGroupNodes(ctx, groupName, opts...)` | Fetch nodes for a specific host group. Optional `ListOptions` filter works the same as `ListVMs`. | `ctx` (context.Context), `groupName` (string), `opts` (...ListOptions) | ([]SlicerNode, error) |
@@ -137,7 +138,7 @@ When you want to host a "Service" or run a server, such as a Kubernetes cluster,
 | `ResumeVM(ctx, hostname)` | Resume a paused VM | `ctx` (context.Context), `hostname` (string) | error |
 | `SuspendVM(ctx, hostname)` | Suspend a running VM to disk. Memory, disk, and device state are saved, and the VM process is stopped. Supported by Slicer for Linux and slicer-mac. | `ctx` (context.Context), `hostname` (string) | error |
 | `RestoreVM(ctx, hostname)` | Restore a previously suspended VM. Use `RestoreVMWithOptions` to wait for agent readiness. Supported by Slicer for Linux and slicer-mac. | `ctx` (context.Context), `hostname` (string) | error |
-| `Shutdown(ctx, hostname, request)` | Shutdown or reboot a VM | `ctx` (context.Context), `hostname` (string), `request` (*SlicerShutdownRequest) | error |
+| `Shutdown(ctx, hostname, request)` | Shutdown, force-stop, or reboot a VM | `ctx` (context.Context), `hostname` (string), `request` (*SlicerShutdownRequest) | error |
 | `GetVMTags(ctx, hostname)` | Get all metadata tags assigned to a VM. | `ctx` (context.Context), `hostname` (string) | (*SlicerVMTags, error) |
 | `UpdateVMTags(ctx, hostname, update)` | Apply an atomic add, remove, replace, or friendly-name operation to VM tags. | `ctx` (context.Context), `hostname` (string), `update` (SlicerVMTagUpdate) | (*SlicerVMTags, error) |
 | `SetVMName(ctx, hostname, name)` | Assign or change a VM's friendly name. | `ctx` (context.Context), `hostname` (string), `name` (string) | (*SlicerVMTags, error) |

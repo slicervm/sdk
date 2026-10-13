@@ -518,6 +518,12 @@ type SlicerDeleteResponse struct {
 	Error       string `json:"error"`
 }
 
+// SlicerDeleteOptions contains per-request VM deletion options.
+type SlicerDeleteOptions struct {
+	// Force bypasses graceful guest shutdown before deleting the VM.
+	Force bool `json:"force,omitempty"`
+}
+
 type SlicerAgentHealthResponse struct {
 	// Hostname is the hostname of the agent
 	Hostname string `json:"hostname,omitempty"`
@@ -548,6 +554,8 @@ type SlicerShutdownRequest struct {
 	// Action specifies the shutdown action: "shutdown" (halt) or "reboot" (restart).
 	// If empty, the SDK defaults to "reboot" for Firecracker compatibility.
 	Action string `json:"action,omitempty"`
+	// Force bypasses the guest shutdown request and stops the VMM directly.
+	Force bool `json:"force,omitempty"`
 }
 
 // SlicerInfo represents version and server information from the /info endpoint

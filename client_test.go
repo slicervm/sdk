@@ -367,6 +367,40 @@ func TestShutdownDefaultsToReboot(t *testing.T) {
 	}
 }
 
+func TestShutdownForceQuery(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("action"); got != "shutdown" {
+			t.Errorf("action = %q, want shutdown", got)
+		}
+		if got := r.URL.Query().Get("force"); got != "true" {
+			t.Errorf("force = %q, want true", got)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := NewSlicerClient(server.URL, "", "test-agent", nil)
+	if err := client.Shutdown(t.Context(), "vm-1", &SlicerShutdownRequest{Action: "shutdown", Force: true}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDeleteVMForceQuery(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("force"); got != "true" {
+			t.Errorf("force = %q, want true", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"message":"VM deleted successfully","disk_removed":"true"}`)
+	}))
+	defer server.Close()
+
+	client := NewSlicerClient(server.URL, "", "test-agent", nil)
+	if _, err := client.DeleteVMWithOptions(t.Context(), "demo", "vm-1", &SlicerDeleteOptions{Force: true}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCreateVMWithOptions_WaitQuery(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -557,6 +591,126 @@ func TestVMTagsReturnsAPIError(t *testing.T) {
 	}
 	if apiErr.Method != http.MethodGet || apiErr.Path != "/vm/missing/tags" {
 		t.Fatalf("unexpected request details: %#v", apiErr)
+	}
+}
+
+func TestVMLifecycleAndCommitMethodsReturnAPIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "operation conflicts with VM state", http.StatusConflict)
+	}))
+	defer server.Close()
+
+	client := NewSlicerClient(server.URL, "", "test-agent", nil)
+	tests := []struct {
+		name       string
+		wantMethod string
+		wantPath   string
+		invoke     func() error
+	}{
+		{
+			name:       "delete VM",
+			wantMethod: http.MethodDelete,
+			wantPath:   "/hostgroup/demo/nodes/demo-1",
+			invoke: func() error {
+				_, err := client.DeleteVM(context.Background(), "demo", "demo-1")
+				return err
+			},
+		},
+		{
+			name:       "shutdown VM",
+			wantMethod: http.MethodPost,
+			wantPath:   "/vm/demo-1/shutdown",
+			invoke: func() error {
+				return client.Shutdown(context.Background(), "demo-1", &SlicerShutdownRequest{Action: "shutdown"})
+			},
+		},
+		{
+			name:       "pause VM",
+			wantMethod: http.MethodPost,
+			wantPath:   "/vm/demo-1/pause",
+			invoke: func() error {
+				return client.PauseVM(context.Background(), "demo-1")
+			},
+		},
+		{
+			name:       "resume VM",
+			wantMethod: http.MethodPost,
+			wantPath:   "/vm/demo-1/resume",
+			invoke: func() error {
+				return client.ResumeVM(context.Background(), "demo-1")
+			},
+		},
+		{
+			name:       "suspend VM",
+			wantMethod: http.MethodPost,
+			wantPath:   "/vm/demo-1/suspend",
+			invoke: func() error {
+				return client.SuspendVM(context.Background(), "demo-1")
+			},
+		},
+		{
+			name:       "restore VM",
+			wantMethod: http.MethodPost,
+			wantPath:   "/vm/demo-1/restore",
+			invoke: func() error {
+				return client.RestoreVM(context.Background(), "demo-1")
+			},
+		},
+		{
+			name:       "commit VM",
+			wantMethod: http.MethodPost,
+			wantPath:   "/vm/demo-1/commit",
+			invoke: func() error {
+				_, err := client.CommitVM(context.Background(), "demo-1")
+				return err
+			},
+		},
+		{
+			name:       "list commits",
+			wantMethod: http.MethodGet,
+			wantPath:   "/vm/commits",
+			invoke: func() error {
+				_, err := client.ListCommits(context.Background(), SlicerCommitListOptions{})
+				return err
+			},
+		},
+		{
+			name:       "delete commit",
+			wantMethod: http.MethodDelete,
+			wantPath:   "/vm/commits/cmt-demo",
+			invoke: func() error {
+				_, err := client.DeleteCommit(context.Background(), "cmt-demo")
+				return err
+			},
+		},
+		{
+			name:       "fork commit",
+			wantMethod: http.MethodPost,
+			wantPath:   "/vm/commits/cmt-demo/fork",
+			invoke: func() error {
+				_, err := client.ForkCommittedVM(context.Background(), "cmt-demo")
+				return err
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.invoke()
+			if !IsAPIStatus(err, http.StatusConflict) {
+				t.Fatalf("expected a 409 API error, got %v", err)
+			}
+			var apiErr *APIError
+			if !errors.As(err, &apiErr) {
+				t.Fatalf("expected *APIError, got %T", err)
+			}
+			if apiErr.Method != tt.wantMethod || apiErr.Path != tt.wantPath {
+				t.Fatalf("request = %s %s, want %s %s", apiErr.Method, apiErr.Path, tt.wantMethod, tt.wantPath)
+			}
+			if apiErr.Body != "operation conflicts with VM state" {
+				t.Fatalf("body = %q", apiErr.Body)
+			}
+		})
 	}
 }
 
