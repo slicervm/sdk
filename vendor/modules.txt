@@ -1,4 +1,4 @@
-# github.com/coder/websocket v1.8.14
+# github.com/coder/websocket v1.8.15
 ## explicit; go 1.23
 github.com/coder/websocket
 github.com/coder/websocket/internal/bpool
