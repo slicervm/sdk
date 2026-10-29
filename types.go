@@ -27,6 +27,9 @@ type SlicerNode struct {
 	Tags          []string  `json:"tags,omitempty"`
 	Status        string    `json:"status,omitempty"` // "Running", "Paused", or "Stopped"
 	Persistent    bool      `json:"persistent,omitempty"`
+	// ForkFinalisationPending means a forked VM is visible, but its guest
+	// identity, agent token, and entropy have not been finalised yet.
+	ForkFinalisationPending bool `json:"fork_finalisation_pending,omitempty"`
 }
 
 // SlicerVMTags is the mutable metadata tag state for a VM.
@@ -64,9 +67,12 @@ type SlicerCreateNodeRequest struct {
 	Network    *SlicerCreateNodeNetworkPolicy `json:"network,omitempty"`
 }
 
-// SlicerCreateNodeNetworkPolicy optionally overrides the host group's
-// isolated-network allow/drop firewall lists for this VM launch.
+// SlicerCreateNodeNetworkPolicy selects a network attachment or overrides an
+// isolated host group's allow/drop firewall lists for this VM launch.
 type SlicerCreateNodeNetworkPolicy struct {
+	// Mode selects native networking ("native") or no NIC ("none").
+	// Omit for the default.
+	Mode  string   `json:"mode,omitempty"`
 	Allow []string `json:"allow,omitempty"`
 	Drop  []string `json:"drop,omitempty"`
 }
@@ -76,6 +82,9 @@ type SlicerCreateNodeNetworkPolicy struct {
 // inheritance semantics on the wire.
 func (p SlicerCreateNodeNetworkPolicy) MarshalJSON() ([]byte, error) {
 	body := make(map[string]any, 2)
+	if p.Mode != "" {
+		body["mode"] = p.Mode
+	}
 	if p.Allow != nil {
 		body["allow"] = p.Allow
 	}
@@ -282,15 +291,18 @@ func WithTimeout(timeout time.Duration) SlicerForkVMOption {
 	return slicerForkVMOptionFunc(func(options *slicerForkVMOptions) { options.Timeout = timeout })
 }
 
-// WithNetwork overrides the source host group's isolated network policy.
+// WithNetwork overrides the commit's network attachment or isolated network policy.
 func WithNetwork(network *SlicerForkVMNetworkPolicy) SlicerForkVMOption {
 	return slicerForkVMOptionFunc(func(options *slicerForkVMOptions) { options.Network = network })
 }
 
-// SlicerForkVMNetworkPolicy optionally overrides the host group's isolated
-// network allow/drop lists. Nil fields inherit; non-nil empty slices clear a
-// list.
+// SlicerForkVMNetworkPolicy optionally overrides the commit's network attachment
+// or the host group's isolated network allow/drop lists. Nil lists inherit;
+// non-nil empty slices clear a list.
 type SlicerForkVMNetworkPolicy struct {
+	// Mode overrides the commit's network attachment: "native" or "none".
+	// Leave Network nil to inherit the source attachment.
+	Mode  string    `json:"mode,omitempty"`
 	Allow *[]string `json:"allow,omitempty"`
 	Drop  *[]string `json:"drop,omitempty"`
 }
