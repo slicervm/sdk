@@ -2,6 +2,42 @@
 
 SDK for [SlicerVM.com](https://slicervm.com)
 
+### Network selection
+
+Slicer for macOS supports two network modes:
+
+- `native`: attach a network device using VZ NAT.
+- `none`: attach no network device and allocate no IP lease. Shell, exec,
+  and file copy remain available over vsock.
+
+For VM creation, leaving `Network` nil uses native networking. To create
+an offline VM, set:
+
+```go
+req := slicer.SlicerCreateNodeRequest{
+    Network: &slicer.SlicerCreateNodeNetworkPolicy{Mode: "none"},
+}
+```
+
+To prepare dependencies online and use them offline, create a VM with
+native networking, install the dependencies, shut it down, and commit its
+filesystem. You can then delete the source VM and fork the commit offline:
+
+```go
+child, err := client.ForkCommittedVM(ctx, commitID,
+    slicer.WithNetwork(&slicer.SlicerForkVMNetworkPolicy{Mode: "none"}))
+```
+
+For cold forks, omitting `WithNetwork` inherits the network mode saved in
+the commit, even after the source VM has been deleted. An explicit mode
+overrides inheritance: use `none` to fork a native commit offline, or
+`native` to give an offline commit networking. Older commits without
+network metadata default to native networking.
+
+Network mode selection is currently supported only by Slicer for macOS.
+For Slicer Linux, leave `Mode` unset; explicitly setting it returns HTTP
+400.
+
 ## Table of Contents
 
 - [Installation](#installation)

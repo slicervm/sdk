@@ -14,6 +14,30 @@ import (
 	"time"
 )
 
+func TestForkNetworkModeRequests(t *testing.T) {
+	for _, mode := range []string{"", "native", "none"} {
+		t.Run(mode, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				data, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Error(err)
+				}
+				checkNetworkMode(t, data, mode)
+				io.WriteString(w, `{"hostname":"sbox-2"}`)
+			}))
+			defer server.Close()
+			client := NewSlicerClient(server.URL, "", "test", nil)
+			var options []SlicerForkVMOption
+			if mode != "" {
+				options = append(options, WithNetwork(&SlicerForkVMNetworkPolicy{Mode: mode}))
+			}
+			if _, err := client.ForkCommittedVM(context.Background(), "cmt-test", options...); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestColdForkClientWorkflow(t *testing.T) {
 	var requests []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -80,3 +80,45 @@ func TestWireBgExecsOmitzero(t *testing.T) {
 func jsonContains(b []byte, sub string) bool {
 	return strings.Contains(string(b), sub)
 }
+
+func TestNetworkModeSerialization(t *testing.T) {
+	for _, mode := range []string{"", "native", "none"} {
+		t.Run(mode, func(t *testing.T) {
+			req := SlicerCreateNodeRequest{}
+			if mode != "" {
+				req.Network = &SlicerCreateNodeNetworkPolicy{Mode: mode}
+			}
+			data, err := json.Marshal(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			checkNetworkMode(t, data, mode)
+		})
+	}
+}
+
+func checkNetworkMode(t *testing.T, data []byte, want string) {
+	t.Helper()
+	var body map[string]json.RawMessage
+	if len(data) > 0 {
+		if err := json.Unmarshal(data, &body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	network, exists := body["network"]
+	if want == "" {
+		if exists {
+			t.Fatalf("omitted network was serialized: %s", data)
+		}
+		return
+	}
+	var policy struct {
+		Mode string `json:"mode"`
+	}
+	if err := json.Unmarshal(network, &policy); err != nil {
+		t.Fatal(err)
+	}
+	if policy.Mode != want {
+		t.Fatalf("mode = %q, want %q", policy.Mode, want)
+	}
+}
