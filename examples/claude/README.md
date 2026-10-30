@@ -17,7 +17,7 @@ For a TCP API with authentication enabled:
 
 ```bash
 SLICER_URL=https://slicer.example.com \
-SLICER_TOKEN_FILE=/var/lib/slicer/auth/token \
+SLICER_TOKEN="$(sudo cat /var/lib/slicer/auth/token)" \
 go run . --prompt "Summarise the VM's CPU, memory, kernel, and operating system"
 ```
 
@@ -54,7 +54,8 @@ It copies the credential into the VM as
 is deleted after Claude exits, including when later setup or inference fails.
 `--keep` retains a one-shot VM. A successfully started `--background` session
 retains a persistent VM, including the copied credential, until you delete it.
-Failed setup or background startup is cleaned up automatically.
+Failed setup or background startup is cleaned up automatically unless `--keep`
+is set; `--keep` also retains failed VMs for inspection.
 
 Claude runs in `/home/ubuntu/workspace`. The example creates that directory
 and records trust for that exact path so a non-interactive or background start

@@ -477,11 +477,14 @@ func TestGetHostGroupNodes_FilterQuery(t *testing.T) {
 		if got := r.URL.Query().Get("tag"); got != "run=claude-test" {
 			t.Fatalf("tag = %q, want run=claude-test", got)
 		}
+		if got := r.URL.Query().Get("tenant"); got != "acme" {
+			t.Fatalf("tenant = %q, want acme", got)
+		}
 		_, _ = io.WriteString(w, `[]`)
 	}))
 	defer server.Close()
 
-	client := NewSlicerClient(server.URL, "", "test-agent", nil)
+	client := NewSlicerClient(server.URL+"?tenant=acme", "", "test-agent", nil)
 	if _, err := client.GetHostGroupNodes(t.Context(), "vm", ListOptions{Tag: "run=claude-test"}); err != nil {
 		t.Fatal(err)
 	}

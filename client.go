@@ -176,16 +176,25 @@ func (c *SlicerClient) makeJSONRequest(method, endpoint string, body interface{}
 
 // makeJSONRequest creates and executes an HTTP request with proper authentication
 func (c *SlicerClient) makeJSONRequestWithContext(ctx context.Context, method, endpoint string, body interface{}) (*http.Response, error) {
+	return c.makeJSONRequestWithContextAndQuery(ctx, method, endpoint, nil, body)
+}
+
+func (c *SlicerClient) makeJSONRequestWithContextAndQuery(ctx context.Context, method, endpoint string, query url.Values, body interface{}) (*http.Response, error) {
 	u, err := url.Parse(c.baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("invalid base URL: %w", err)
 	}
-	endpointURL, err := url.Parse(endpoint)
-	if err != nil {
-		return nil, fmt.Errorf("invalid endpoint: %w", err)
+	u.Path = path.Join(u.Path, endpoint)
+	if len(query) > 0 {
+		merged := u.Query()
+		for key, values := range query {
+			merged.Del(key)
+			for _, value := range values {
+				merged.Add(key, value)
+			}
+		}
+		u.RawQuery = merged.Encode()
 	}
-	u.Path = path.Join(u.Path, endpointURL.Path)
-	u.RawQuery = endpointURL.RawQuery
 
 	var reqBody io.Reader
 	if body != nil {
@@ -276,7 +285,7 @@ type ListOptions struct {
 	TagPrefix string
 }
 
-func (o ListOptions) query() string {
+func (o ListOptions) query() url.Values {
 	q := url.Values{}
 	if o.Tag != "" {
 		q.Set("tag", o.Tag)
@@ -284,10 +293,7 @@ func (o ListOptions) query() string {
 	if o.TagPrefix != "" {
 		q.Set("tag_prefix", o.TagPrefix)
 	}
-	if len(q) == 0 {
-		return ""
-	}
-	return "?" + q.Encode()
+	return q
 }
 
 // firstListOption returns the first ListOptions in the variadic slice, or
@@ -303,8 +309,8 @@ func firstListOption(opts []ListOptions) ListOptions {
 // filters (tag / tag_prefix) may be supplied; only the first opts entry is
 // honored.
 func (c *SlicerClient) GetHostGroupNodes(ctx context.Context, groupName string, opts ...ListOptions) ([]SlicerNode, error) {
-	endpoint := fmt.Sprintf("hostgroup/%s/nodes%s", groupName, firstListOption(opts).query())
-	res, err := c.makeJSONRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	endpoint := fmt.Sprintf("hostgroup/%s/nodes", groupName)
+	res, err := c.makeJSONRequestWithContextAndQuery(ctx, http.MethodGet, endpoint, firstListOption(opts).query(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch nodes: %w", err)
 	}
@@ -1006,8 +1012,15 @@ func (c *SlicerClient) ListVMs(ctx context.Context, opts ...ListOptions) ([]Slic
 	}
 
 	u.Path = "/nodes"
-	if qs := firstListOption(opts).query(); qs != "" {
-		u.RawQuery = strings.TrimPrefix(qs, "?")
+	if query := firstListOption(opts).query(); len(query) > 0 {
+		merged := u.Query()
+		for key, values := range query {
+			merged.Del(key)
+			for _, value := range values {
+				merged.Add(key, value)
+			}
+		}
+		u.RawQuery = merged.Encode()
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
