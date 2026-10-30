@@ -119,9 +119,13 @@ func run(opts options) error {
 	if err != nil {
 		return fmt.Errorf("create run tag: %w", err)
 	}
+	serverWait, err := serverWaitTimeout(ctx)
+	if err != nil {
+		return err
+	}
 	keepVM := opts.keep || opts.background
 	fmt.Printf("Creating a VM in %q (run=%s)\n", hostGroup, runTag)
-	node, err := client.CreateVMWithOptions(ctx, hostGroup, slicer.SlicerCreateNodeRequest{
+	node, err := createVM(ctx, client, hostGroup, runTag, slicer.SlicerCreateNodeRequest{
 		CPUs:       opts.cpus,
 		RamBytes:   slicer.GiB(opts.ramGB),
 		Persistent: keepVM,
@@ -132,10 +136,10 @@ func run(opts options) error {
 		},
 	}, slicer.SlicerCreateNodeOptions{
 		Wait:    slicer.SlicerCreateNodeWaitUserdata,
-		Timeout: opts.timeout,
+		Timeout: serverWait,
 	})
 	if err != nil {
-		return fmt.Errorf("create VM: %w", err)
+		return err
 	}
 	if node.HostGroup != "" {
 		hostGroup = node.HostGroup
@@ -196,6 +200,87 @@ func run(opts options) error {
 		fmt.Printf("Attach later with a VM shell, then run `claude agents` and `claude attach <id>`.\n")
 	}
 	return nil
+}
+
+func createVM(ctx context.Context, client *slicer.SlicerClient, hostGroup, runTag string, request slicer.SlicerCreateNodeRequest, createOptions slicer.SlicerCreateNodeOptions) (*slicer.SlicerCreateNodeResponse, error) {
+	node, err := client.CreateVMWithOptions(ctx, hostGroup, request, createOptions)
+	if err == nil {
+		return node, nil
+	}
+
+	createErr := fmt.Errorf("create VM: %w", err)
+	waitForVM := errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
+	cleanupTimeout := time.Minute
+	if waitForVM {
+		cleanupTimeout = 30 * time.Second
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
+	defer cancel()
+	if cleanupErr := deleteVMsByRunTag(cleanupCtx, client, hostGroup, runTag, waitForVM); cleanupErr != nil {
+		return nil, errors.Join(createErr, fmt.Errorf("reconcile failed create: %w", cleanupErr))
+	}
+	return nil, createErr
+}
+
+func deleteVMsByRunTag(ctx context.Context, client *slicer.SlicerClient, hostGroup, runTag string, waitForVM bool) error {
+	tag := "run=" + runTag
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		nodes, err := client.GetHostGroupNodes(ctx, hostGroup)
+		if err != nil {
+			return fmt.Errorf("list VMs while looking for tag %s: %w", tag, err)
+		}
+		found := false
+		for _, node := range nodes {
+			if !contains(node.Tags, tag) {
+				continue
+			}
+			found = true
+			if _, err := client.DeleteVM(ctx, hostGroup, node.Hostname); err != nil {
+				return fmt.Errorf("delete VM %s: %w", node.Hostname, err)
+			}
+		}
+		if found || !waitForVM {
+			return nil
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("VM tagged %s did not appear before cleanup deadline: %w", tag, ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
+func contains(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
+}
+
+func serverWaitTimeout(ctx context.Context) (time.Duration, error) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return 0, fmt.Errorf("provisioning requires a context deadline")
+	}
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return 0, context.DeadlineExceeded
+	}
+
+	margin := 5 * time.Second
+	if remaining < 25*time.Second {
+		margin = remaining / 5
+	}
+	wait := remaining - margin
+	if wait <= 0 {
+		return 0, fmt.Errorf("timeout is too short for provisioning")
+	}
+	return wait, nil
 }
 
 func configureClaude(ctx context.Context, client *slicer.SlicerClient, vmName, credentials, settings string) error {
