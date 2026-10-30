@@ -190,6 +190,7 @@ func TestNormalizeUnixSocketPath(t *testing.T) {
 		{name: "tilde socket path", input: "~/slicer.sock", want: filepath.Join(home, "slicer.sock"), ok: true},
 		{name: "unix scheme path", input: "unix:///tmp/slicer.sock", want: "/tmp/slicer.sock", ok: true},
 		{name: "http url", input: "http://127.0.0.1:8080", want: "", ok: false},
+		{name: "HTTPS URL with socket suffix", input: "https://slicer.example.com/api.sock", want: "", ok: false},
 	}
 
 	for _, tt := range tests {

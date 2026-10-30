@@ -368,6 +368,7 @@ func deleteVMWithRetry(ctx context.Context, client *slicer.SlicerClient, hostGro
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 	var lastErr error
+	absentObservations := 0
 	for {
 		if _, err := client.DeleteVM(ctx, hostGroup, hostname); err == nil || slicer.IsAPIStatus(err, http.StatusNotFound) {
 			return nil
@@ -392,7 +393,12 @@ func deleteVMWithRetry(ctx context.Context, client *slicer.SlicerClient, hostGro
 				}
 			}
 			if !found {
-				return nil
+				absentObservations++
+				if absentObservations >= 2 {
+					return nil
+				}
+			} else {
+				absentObservations = 0
 			}
 		}
 

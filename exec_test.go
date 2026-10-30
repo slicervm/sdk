@@ -20,6 +20,23 @@ type capturedRequest struct {
 	QueryParams url.Values
 }
 
+type execRoundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f execRoundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return f(r)
+}
+
+type eofOnCancelBody struct {
+	ctx context.Context
+}
+
+func (b *eofOnCancelBody) Read(_ []byte) (int, error) {
+	<-b.ctx.Done()
+	return 0, io.EOF
+}
+
+func (b *eofOnCancelBody) Close() error { return nil }
+
 func newTestServer(t *testing.T, handler http.HandlerFunc) (*httptest.Server, *capturedRequest) {
 	t.Helper()
 	captured := &capturedRequest{}
@@ -428,6 +445,29 @@ func TestRemoteCmd_ContextCancellationAfterOutput(t *testing.T) {
 	}
 	if got := cmd.ProcessState.ExitCode(); got != -1 {
 		t.Fatalf("ExitCode() = %d, want -1", got)
+	}
+}
+
+func TestRemoteCmd_ContextCancellationSurfacedWhenBodyReturnsEOF(t *testing.T) {
+	httpClient := &http.Client{Transport: execRoundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Header:     make(http.Header),
+			Body:       &eofOnCancelBody{ctx: r.Context()},
+			Request:    r,
+		}, nil
+	})}
+	client := NewSlicerClient("http://example.test", "test-token", "test-agent", httpClient)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	cmd := client.Command(ctx, "test-vm", "slow-command")
+	if _, err := cmd.CombinedOutput(); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("CombinedOutput() error = %v, want context deadline exceeded", err)
+	}
+	if cmd.ProcessState == nil || cmd.ProcessState.Exited() || cmd.ProcessState.Success() {
+		t.Fatalf("canceled process state = %v, want not exited and unsuccessful", cmd.ProcessState)
 	}
 }
 

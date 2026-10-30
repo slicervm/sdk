@@ -45,8 +45,12 @@ func normalizeUnixSocketPath(path string) (string, bool) {
 		return "", false
 	}
 
+	explicitUnix := strings.HasPrefix(path, "unix://")
 	if strings.HasPrefix(path, "unix://") {
 		path = strings.TrimPrefix(path, "unix://")
+	}
+	if !explicitUnix && strings.Contains(path, "://") {
+		return "", false
 	}
 
 	switch {
