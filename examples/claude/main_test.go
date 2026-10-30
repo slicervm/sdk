@@ -62,11 +62,14 @@ func TestResolveToken(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got, err := resolveToken(" direct-token ", tokenFile); err != nil || got != "direct-token" {
+	if got, err := resolveToken(" direct-token ", tokenFile, false); err != nil || got != "direct-token" {
 		t.Fatalf("direct token: got %q, err=%v", got, err)
 	}
-	if got, err := resolveToken("", tokenFile); err != nil || got != "file-token" {
+	if got, err := resolveToken("", tokenFile, false); err != nil || got != "file-token" {
 		t.Fatalf("file token: got %q, err=%v", got, err)
+	}
+	if got, err := resolveToken("environment-token", tokenFile, true); err != nil || got != "file-token" {
+		t.Fatalf("explicit token file: got %q, err=%v", got, err)
 	}
 }
 

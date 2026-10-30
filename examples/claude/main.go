@@ -27,19 +27,21 @@ chmod 0755 /usr/local/bin/claude
 const guestWorkspace = "/home/ubuntu/workspace"
 
 type options struct {
-	baseURL        string
-	token          string
-	tokenFile      string
-	hostGroup      string
-	credentials    string
-	settings       string
-	prompt         string
-	background     bool
-	keep           bool
-	timeout        time.Duration
-	cpus           int
-	ramGB          int64
-	keychainLookup func(context.Context) ([]byte, error)
+	baseURL           string
+	token             string
+	tokenFile         string
+	tokenExplicit     bool
+	tokenFileExplicit bool
+	hostGroup         string
+	credentials       string
+	settings          string
+	prompt            string
+	background        bool
+	keep              bool
+	timeout           time.Duration
+	cpus              int
+	ramGB             int64
+	keychainLookup    func(context.Context) ([]byte, error)
 }
 
 func main() {
@@ -57,6 +59,14 @@ func main() {
 	flag.IntVar(&opts.cpus, "cpus", 2, "VM CPU count")
 	flag.Int64Var(&opts.ramGB, "ram-gb", 4, "VM RAM in GiB")
 	flag.Parse()
+	flag.Visit(func(value *flag.Flag) {
+		switch value.Name {
+		case "token":
+			opts.tokenExplicit = true
+		case "token-file":
+			opts.tokenFileExplicit = true
+		}
+	})
 
 	if err := run(opts); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -79,7 +89,13 @@ func run(opts options) error {
 	}
 
 	baseURL := expandPath(opts.baseURL)
-	token, err := resolveToken(opts.token, opts.tokenFile)
+	if opts.tokenExplicit && opts.tokenFileExplicit {
+		return fmt.Errorf("--token and --token-file cannot be used together")
+	}
+	if opts.tokenFileExplicit && strings.TrimSpace(opts.tokenFile) == "" {
+		return fmt.Errorf("--token-file must not be empty")
+	}
+	token, err := resolveToken(opts.token, opts.tokenFile, opts.tokenFileExplicit)
 	if err != nil {
 		return err
 	}
@@ -328,8 +344,8 @@ func hostGroupNames(groups []slicer.SlicerHostGroup) string {
 	return strings.Join(names, ", ")
 }
 
-func resolveToken(token, tokenFile string) (string, error) {
-	if strings.TrimSpace(token) != "" {
+func resolveToken(token, tokenFile string, tokenFileExplicit bool) (string, error) {
+	if strings.TrimSpace(token) != "" && !tokenFileExplicit {
 		return strings.TrimSpace(token), nil
 	}
 	if tokenFile == "" {
