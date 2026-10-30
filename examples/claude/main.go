@@ -13,9 +13,11 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	slicer "github.com/slicervm/sdk"
@@ -76,6 +78,12 @@ func main() {
 }
 
 func run(opts options) (runErr error) {
+	parent, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	return runWithContext(parent, opts)
+}
+
+func runWithContext(parent context.Context, opts options) (runErr error) {
 	if strings.TrimSpace(opts.baseURL) == "" {
 		return fmt.Errorf("--url or SLICER_URL is required")
 	}
@@ -101,7 +109,7 @@ func run(opts options) (runErr error) {
 		return err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), opts.timeout)
+	ctx, cancel := context.WithTimeout(parent, opts.timeout)
 	defer cancel()
 
 	credentials, cleanupCredentials, err := resolveClaudeCredentials(ctx, opts.credentials, opts.keychainLookup)
@@ -126,7 +134,7 @@ func run(opts options) (runErr error) {
 	}
 	keepVM := opts.keep || opts.background
 	fmt.Printf("Creating a VM in %q (run=%s)\n", hostGroup, runTag)
-	node, err := createVM(ctx, client, hostGroup, runTag, slicer.SlicerCreateNodeRequest{
+	node, err := createVM(ctx, client, hostGroup, runTag, opts.keep, slicer.SlicerCreateNodeRequest{
 		CPUs:       opts.cpus,
 		RamBytes:   slicer.GiB(opts.ramGB),
 		Persistent: keepVM,
@@ -250,7 +258,7 @@ func validateEndpoint(baseURL string) error {
 	}
 }
 
-func createVM(ctx context.Context, client *slicer.SlicerClient, hostGroup, runTag string, request slicer.SlicerCreateNodeRequest, createOptions slicer.SlicerCreateNodeOptions) (*slicer.SlicerCreateNodeResponse, error) {
+func createVM(ctx context.Context, client *slicer.SlicerClient, hostGroup, runTag string, keepOnFailure bool, request slicer.SlicerCreateNodeRequest, createOptions slicer.SlicerCreateNodeOptions) (*slicer.SlicerCreateNodeResponse, error) {
 	node, err := client.CreateVMWithOptions(ctx, hostGroup, request, createOptions)
 	if err == nil {
 		return node, nil
@@ -259,6 +267,9 @@ func createVM(ctx context.Context, client *slicer.SlicerClient, hostGroup, runTa
 	createErr := fmt.Errorf("create VM: %w", err)
 	if !ambiguousCreateFailure(err) {
 		return nil, createErr
+	}
+	if keepOnFailure {
+		return nil, fmt.Errorf("%w; a VM may remain with tag run=%s because --keep is set", createErr, runTag)
 	}
 	cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

@@ -189,7 +189,7 @@ func TestCreateVMCleansUpAfterWaitTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = createVM(ctx, client, "demo", runTag, slicer.SlicerCreateNodeRequest{
+	_, err = createVM(ctx, client, "demo", runTag, false, slicer.SlicerCreateNodeRequest{
 		Tags: []string{"example=claude", "run=" + runTag},
 	}, slicer.SlicerCreateNodeOptions{
 		Wait:    slicer.SlicerCreateNodeWaitUserdata,
@@ -235,7 +235,7 @@ func TestCreateVMReconcilesAfterClientDeadline(t *testing.T) {
 	client := slicer.NewSlicerClient(server.URL, "", "test", server.Client())
 	ctx, cancel := context.WithTimeout(t.Context(), 75*time.Millisecond)
 	defer cancel()
-	_, err := createVM(ctx, client, "demo", runTag, slicer.SlicerCreateNodeRequest{
+	_, err := createVM(ctx, client, "demo", runTag, false, slicer.SlicerCreateNodeRequest{
 		Tags: []string{"example=claude", "run=" + runTag},
 	}, slicer.SlicerCreateNodeOptions{
 		Wait:    slicer.SlicerCreateNodeWaitUserdata,
@@ -293,7 +293,7 @@ func TestCreateVMReconcilesAfterGatewayFailure(t *testing.T) {
 	defer server.Close()
 
 	client := slicer.NewSlicerClient(server.URL, "", "test", server.Client())
-	_, err := createVM(t.Context(), client, "demo", runTag, slicer.SlicerCreateNodeRequest{
+	_, err := createVM(t.Context(), client, "demo", runTag, false, slicer.SlicerCreateNodeRequest{
 		Tags: []string{"example=claude", "run=" + runTag},
 	}, slicer.SlicerCreateNodeOptions{
 		Wait:    slicer.SlicerCreateNodeWaitUserdata,
@@ -307,6 +307,39 @@ func TestCreateVMReconcilesAfterGatewayFailure(t *testing.T) {
 	}
 	if !deleted.Load() {
 		t.Fatal("VM created after the gateway failure was not deleted")
+	}
+}
+
+func TestCreateVMKeepRetainsAmbiguousCreate(t *testing.T) {
+	var followUpCalls atomic.Int32
+	const runTag = "claude-keep-test"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/hostgroup/demo/nodes" {
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte(`{"error":"upstream response lost"}`))
+			return
+		}
+		followUpCalls.Add(1)
+		http.Error(w, "unexpected request", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client := slicer.NewSlicerClient(server.URL, "", "test", server.Client())
+	_, err := createVM(t.Context(), client, "demo", runTag, true, slicer.SlicerCreateNodeRequest{
+		Tags: []string{"example=claude", "run=" + runTag},
+	}, slicer.SlicerCreateNodeOptions{
+		Wait:    slicer.SlicerCreateNodeWaitUserdata,
+		Timeout: time.Second,
+	})
+	if !slicer.IsAPIStatus(err, http.StatusBadGateway) {
+		t.Fatalf("error: got %v, want gateway failure", err)
+	}
+	if !strings.Contains(err.Error(), "a VM may remain with tag run="+runTag) {
+		t.Fatalf("error %q does not explain retained VM lookup", err)
+	}
+	if got := followUpCalls.Load(); got != 0 {
+		t.Fatalf("follow-up API calls = %d, want 0", got)
 	}
 }
 
