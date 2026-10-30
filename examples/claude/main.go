@@ -64,6 +64,10 @@ func main() {
 	flag.IntVar(&opts.cpus, "cpus", 2, "VM CPU count")
 	flag.Int64Var(&opts.ramGB, "ram-gb", 4, "VM RAM in GiB")
 	flag.Parse()
+	if err := validatePositionalArgs(flag.Args()); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(2)
+	}
 	flag.Visit(func(value *flag.Flag) {
 		switch value.Name {
 		case "token-file":
@@ -80,6 +84,10 @@ func main() {
 func run(opts options) (runErr error) {
 	parent, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go func() {
+		<-parent.Done()
+		stop()
+	}()
 	return runWithContext(parent, opts)
 }
 
@@ -97,7 +105,7 @@ func runWithContext(parent context.Context, opts options) (runErr error) {
 		return fmt.Errorf("--timeout must be greater than zero")
 	}
 
-	baseURL := expandPath(opts.baseURL)
+	baseURL := expandPath(strings.TrimSpace(opts.baseURL))
 	if err := validateEndpoint(baseURL); err != nil {
 		return err
 	}
@@ -222,11 +230,26 @@ func validateResources(cpus int, ramGB int64) error {
 	return nil
 }
 
+func validatePositionalArgs(args []string) error {
+	if len(args) > 0 {
+		return fmt.Errorf("unexpected positional arguments: %s; use --prompt for the Claude prompt", strings.Join(args, " "))
+	}
+	return nil
+}
+
 func validateEndpoint(baseURL string) error {
 	value := strings.TrimSpace(baseURL)
+	if strings.HasPrefix(value, "unix://") {
+		socket := strings.TrimPrefix(value, "unix://")
+		if strings.HasPrefix(socket, "/") || strings.HasPrefix(socket, "./") ||
+			strings.HasPrefix(socket, "../") || strings.HasPrefix(socket, "~/") ||
+			strings.HasSuffix(socket, ".sock") {
+			return nil
+		}
+		return fmt.Errorf("unsupported Unix socket endpoint %q: use an absolute, relative, home-relative, or .sock path", value)
+	}
 	if strings.HasPrefix(value, "/") || strings.HasPrefix(value, "./") ||
 		strings.HasPrefix(value, "../") || strings.HasPrefix(value, "~/") ||
-		strings.HasPrefix(value, "unix://") ||
 		(strings.HasSuffix(value, ".sock") && !strings.Contains(value, "://")) {
 		return nil
 	}

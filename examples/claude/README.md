@@ -88,21 +88,37 @@ go run . --background --prompt "Review issue #123 and start reproducing it"
 ```
 
 The example creates a persistent VM in this mode and prints Claude's background
-session identifier. Open a shell into the VM later, then use `claude agents`
-and `claude attach <id>`. Claude retains its own session and prompt state inside
-the VM so that logs and attachment work. The prompt is submitted once; Slicer
-does not replay it when the VM is relaunched.
+session identifier and VM hostname. Assign the printed hostname, then open a
+shell into the VM:
+
+```bash
+VM_NAME=e2e-2
+
+# Authenticated TCP API
+SLICER_TOKEN="$(sudo cat /var/lib/slicer/auth/token)" \
+slicer vm shell "$VM_NAME" --url https://slicer.example.com
+
+# Or Slicer for Mac / an unauthenticated Unix socket
+slicer vm shell "$VM_NAME" --url ~/slicer-mac/slicer.sock
+```
+
+Inside the VM, run `claude agents`, followed by `claude attach <id>`. Claude
+retains its own session and prompt state inside the VM so that logs and
+attachment work. The prompt is submitted once; Slicer does not replay it when
+the VM is relaunched.
 
 The retained VM also contains the copied Claude credential. Delete it when the
 session is no longer required:
 
 ```bash
+VM_NAME=e2e-2
+
 # Authenticated TCP API
 SLICER_TOKEN="$(sudo cat /var/lib/slicer/auth/token)" \
-slicer vm delete <hostname> --url https://slicer.example.com
+slicer vm delete "$VM_NAME" --url https://slicer.example.com
 
 # Slicer for Mac or an unauthenticated local Unix socket
-slicer vm delete <hostname> --url ~/slicer-mac/slicer.sock
+slicer vm delete "$VM_NAME" --url ~/slicer-mac/slicer.sock
 ```
 
 An interactive implementation could instead put Claude in a named tmux session.

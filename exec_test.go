@@ -422,6 +422,26 @@ func TestRemoteCmd_ContextCancellationAfterOutput(t *testing.T) {
 	}
 }
 
+func TestRemoteCmd_ExitFrameWinsOverLaterCancellation(t *testing.T) {
+	server, _ := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeExecResult(w, SlicerExecWriteResult{
+			Type:      "exit",
+			Timestamp: time.Now(),
+			ExitCode:  0,
+		})
+		<-r.Context().Done()
+	})
+
+	client := NewSlicerClient(server.URL, "test-token", "test-agent", nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	cmd := client.Command(ctx, "test-vm", "quick-command")
+	if _, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("CombinedOutput() failed after a successful exit frame: %v", err)
+	}
+}
+
 func TestRemoteCmd_DoubleStart(t *testing.T) {
 	server, _ := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		writeExecResult(w, SlicerExecWriteResult{
