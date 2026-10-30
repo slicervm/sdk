@@ -28,6 +28,9 @@ func TestValidateEndpoint(t *testing.T) {
 		{name: "absolute socket", value: "/run/slicer.sock"},
 		{name: "relative socket", value: "./slicer.sock"},
 		{name: "Mac socket", value: "~/slicer-mac/slicer.sock"},
+		{name: "trimmed HTTPS", value: "  https://slicer.example.com  "},
+		{name: "Unix absolute socket", value: "unix:///run/slicer.sock"},
+		{name: "malformed Unix socket", value: "unix://relative/path", wantErr: true},
 		{name: "remote plaintext", value: "http://192.0.2.1:8080", wantErr: true},
 		{name: "remote plaintext socket suffix", value: "http://192.0.2.1/api.sock", wantErr: true},
 		{name: "HTTPS without host", value: "https:///api", wantErr: true},
@@ -44,6 +47,16 @@ func TestValidateEndpoint(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestValidatePositionalArgs(t *testing.T) {
+	if err := validatePositionalArgs(nil); err != nil {
+		t.Fatal(err)
+	}
+	err := validatePositionalArgs([]string{"accidental", "--keep"})
+	if err == nil || !strings.Contains(err.Error(), "--keep") {
+		t.Fatalf("error = %v, want the unparsed flag to be reported", err)
 	}
 }
 

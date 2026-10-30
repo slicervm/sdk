@@ -716,8 +716,10 @@ func (c *SlicerClient) execWithReader(ctx context.Context, nodeName string, exec
 			// Send all results through the channel - let the caller handle exit codes
 			resChan <- result
 
-			// If there's an error or non-zero exit code, this is the last message
-			if result.Error != "" || result.ExitCode != 0 {
+			// An exit frame is terminal even when its exit code is zero. Returning
+			// here prevents a later context deadline from replacing a completed
+			// command's result while the HTTP response is still open.
+			if result.Type == "exit" || result.Error != "" || result.ExitCode != 0 {
 				return
 			}
 		}
