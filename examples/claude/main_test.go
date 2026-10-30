@@ -126,7 +126,7 @@ func TestCreateVMCleansUpAfterWaitTimeout(t *testing.T) {
 				return
 			}
 		case r.Method == http.MethodGet && r.URL.Path == "/hostgroup/demo/nodes":
-			_, _ = w.Write([]byte(`[{"hostname":"demo-1","hostgroup":"demo","tags":["run=claude-timeout-test"]}]`))
+			_, _ = w.Write([]byte(`[{"hostname":"unrelated","hostgroup":"demo","tags":["purpose=other"]},{"hostname":"demo-1","hostgroup":"demo","tags":["run=claude-timeout-test"]}]`))
 		case r.Method == http.MethodDelete && r.URL.Path == "/hostgroup/demo/nodes/demo-1":
 			deleted.Store(true)
 			_, _ = w.Write([]byte(`{"message":"deleted"}`))
@@ -176,7 +176,7 @@ func TestCreateVMReconcilesAfterClientDeadline(t *testing.T) {
 				_, _ = w.Write([]byte(`[]`))
 				return
 			}
-			_, _ = w.Write([]byte(`[{"hostname":"demo-2","hostgroup":"demo","tags":["run=claude-client-timeout-test"]}]`))
+			_, _ = w.Write([]byte(`[{"hostname":"unrelated","hostgroup":"demo","tags":["purpose=other"]},{"hostname":"demo-2","hostgroup":"demo","tags":["run=claude-client-timeout-test"]}]`))
 		case r.Method == http.MethodDelete && r.URL.Path == "/hostgroup/demo/nodes/demo-2":
 			deleted.Store(true)
 			_, _ = w.Write([]byte(`{"message":"deleted"}`))
@@ -235,7 +235,7 @@ func TestCreateVMReconcilesAfterGatewayFailure(t *testing.T) {
 				_, _ = w.Write([]byte(`[]`))
 				return
 			}
-			_, _ = w.Write([]byte(`[{"hostname":"demo-3","hostgroup":"demo","tags":["run=claude-gateway-failure-test"]}]`))
+			_, _ = w.Write([]byte(`[{"hostname":"unrelated","hostgroup":"demo","tags":["purpose=other"]},{"hostname":"demo-3","hostgroup":"demo","tags":["run=claude-gateway-failure-test"]}]`))
 		case r.Method == http.MethodDelete && r.URL.Path == "/hostgroup/demo/nodes/demo-3":
 			deleted.Store(true)
 			w.WriteHeader(http.StatusBadGateway)
@@ -261,5 +261,32 @@ func TestCreateVMReconcilesAfterGatewayFailure(t *testing.T) {
 	}
 	if !deleted.Load() {
 		t.Fatal("VM created after the gateway failure was not deleted")
+	}
+}
+
+func TestDeleteVMWithRetryConfirmsLostResponse(t *testing.T) {
+	var deleteCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodDelete && r.URL.Path == "/hostgroup/demo/nodes/demo-4":
+			deleteCalls.Add(1)
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte(`{"error":"response lost"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/hostgroup/demo/nodes":
+			_, _ = w.Write([]byte(`[{"hostname":"unrelated","hostgroup":"demo","tags":["purpose=other"]}]`))
+		default:
+			http.Error(w, "unexpected request", http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client := slicer.NewSlicerClient(server.URL, "", "test", server.Client())
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	if err := deleteVMWithRetry(ctx, client, "demo", "demo-4", "claude-normal-cleanup-test"); err != nil {
+		t.Fatal(err)
+	}
+	if got := deleteCalls.Load(); got != 1 {
+		t.Fatalf("delete calls = %d, want 1", got)
 	}
 }

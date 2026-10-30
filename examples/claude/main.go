@@ -75,7 +75,7 @@ func main() {
 	}
 }
 
-func run(opts options) error {
+func run(opts options) (runErr error) {
 	if strings.TrimSpace(opts.baseURL) == "" {
 		return fmt.Errorf("--url or SLICER_URL is required")
 	}
@@ -152,11 +152,11 @@ func run(opts options) error {
 		if opts.keep || (opts.background && completed) {
 			return
 		}
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cleanupCancel()
 		fmt.Printf("Deleting VM %s\n", node.Hostname)
-		if _, deleteErr := client.DeleteVM(cleanupCtx, hostGroup, node.Hostname); deleteErr != nil {
-			fmt.Fprintf(os.Stderr, "warning: delete VM %s: %v\n", node.Hostname, deleteErr)
+		if cleanupErr := deleteVMWithRetry(cleanupCtx, client, hostGroup, node.Hostname, runTag); cleanupErr != nil {
+			runErr = errors.Join(runErr, fmt.Errorf("delete VM %s: %w", node.Hostname, cleanupErr))
 		}
 	}()
 
@@ -171,7 +171,6 @@ func run(opts options) error {
 	} else {
 		claudeArgs = append(claudeArgs, "--print")
 	}
-	claudeArgs = append(claudeArgs, opts.prompt)
 	command := client.CommandContext(ctx, node.Hostname, "/usr/local/bin/claude", claudeArgs...)
 	command.UID = slicer.NonRootUser
 	command.GID = slicer.NonRootUser
@@ -181,6 +180,7 @@ func run(opts options) error {
 		"USER=ubuntu",
 		"PATH=/home/ubuntu/.local/bin:/home/ubuntu/.arkade/bin:/usr/local/bin:/usr/bin:/bin",
 	}
+	command.Stdin = strings.NewReader(opts.prompt)
 
 	output, err := command.CombinedOutput()
 	if len(output) > 0 {
@@ -252,6 +252,9 @@ func deleteVMsByRunTag(ctx context.Context, client *slicer.SlicerClient, hostGro
 		found := false
 		retry := false
 		for _, node := range nodes {
+			if !contains(node.Tags, tag) {
+				continue
+			}
 			found = true
 			deleteAttempted = true
 			if _, err := client.DeleteVM(ctx, hostGroup, node.Hostname); err != nil {
@@ -272,6 +275,54 @@ func deleteVMsByRunTag(ctx context.Context, client *slicer.SlicerClient, hostGro
 			return err
 		}
 	}
+}
+
+func deleteVMWithRetry(ctx context.Context, client *slicer.SlicerClient, hostGroup, hostname, runTag string) error {
+	tag := "run=" + runTag
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+	var lastErr error
+	for {
+		if _, err := client.DeleteVM(ctx, hostGroup, hostname); err == nil || slicer.IsAPIStatus(err, http.StatusNotFound) {
+			return nil
+		} else if !retryableAPIError(err) {
+			return err
+		} else {
+			lastErr = err
+		}
+
+		nodes, err := client.GetHostGroupNodes(ctx, hostGroup, slicer.ListOptions{Tag: tag})
+		if err != nil {
+			if !retryableAPIError(err) {
+				return err
+			}
+			lastErr = err
+		} else {
+			found := false
+			for _, node := range nodes {
+				if node.Hostname == hostname && contains(node.Tags, tag) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return nil
+			}
+		}
+
+		if err := waitForRetry(ctx, ticker.C, tag, lastErr); err != nil {
+			return err
+		}
+	}
+}
+
+func contains(values []string, expected string) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func waitForRetry(ctx context.Context, retry <-chan time.Time, tag string, lastErr error) error {

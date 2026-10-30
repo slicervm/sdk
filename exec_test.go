@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -247,6 +248,45 @@ func TestRemoteCmd_DirAndUIDPassedCorrectly(t *testing.T) {
 	}
 	if captured.QueryParams.Get("gid") != "1000" {
 		t.Errorf("gid = %q, want 1000", captured.QueryParams.Get("gid"))
+	}
+}
+
+func TestRemoteCmd_StdinAndNonRootSentinel(t *testing.T) {
+	const prompt = "private prompt text"
+	var body string
+	server, captured := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body = string(raw)
+		writeExecResult(w, SlicerExecWriteResult{Stdout: "done\n"})
+		writeExecResult(w, SlicerExecWriteResult{ExitCode: 0})
+	})
+
+	client := NewSlicerClient(server.URL, "test-token", "test-agent", nil)
+	cmd := client.Command(t.Context(), "test-vm", "claude", "--print")
+	cmd.UID = NonRootUser
+	cmd.GID = NonRootUser
+	cmd.Stdin = strings.NewReader(prompt)
+	if _, err := cmd.Output(); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := captured.QueryParams.Get("uid"); got != "" {
+		t.Fatalf("uid = %q, want omitted", got)
+	}
+	if got := captured.QueryParams.Get("gid"); got != "" {
+		t.Fatalf("gid = %q, want omitted", got)
+	}
+	if got := captured.QueryParams.Get("stdin"); got != "true" {
+		t.Fatalf("stdin = %q, want true", got)
+	}
+	if strings.Contains(captured.QueryParams.Encode(), prompt) {
+		t.Fatal("prompt leaked into request query")
+	}
+	if body != prompt {
+		t.Fatalf("request body = %q, want prompt", body)
 	}
 }
 
