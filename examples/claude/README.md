@@ -18,7 +18,7 @@ For a TCP API with authentication enabled:
 ```bash
 SLICER_URL=https://slicer.example.com \
 SLICER_TOKEN_FILE=/var/lib/slicer/auth/token \
-go run . --prompt "Review the code in /home/ubuntu and summarise it"
+go run . --prompt "Summarise the VM's CPU, memory, kernel, and operating system"
 ```
 
 For an unauthenticated Unix socket, omit the token:
