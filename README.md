@@ -320,7 +320,7 @@ build as part of the root SDK module.
 
 * [Create a VM and block until agent readiness](examples/create/main.go)
 * [Create a VM with k3s installed via Userdata](examples/k3s-userdata/main.go)
-* [Create a VM with Claude Code and run a headless inference](examples/claude/main.go)
+* [Create a VM with Claude Code and run a headless inference](examples/claude/)
 * [Upload a file to process in VM, download the results](examples/transform/main.go)
 * [Measure time to first interactive exec](examples/time_till_interactive/main.go)
 * [Install nginx and port-forward port 80 to the host](examples/nginx/main.go)

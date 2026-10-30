@@ -206,6 +206,24 @@ func TestNormalizeUnixSocketPath(t *testing.T) {
 	}
 }
 
+func TestUnixClientPreservesRedirectPolicy(t *testing.T) {
+	wantErr := errors.New("redirects disabled")
+	policy := func(_ *http.Request, _ []*http.Request) error { return wantErr }
+	client := NewSlicerClient("/tmp/slicer.sock", "", "test-agent", &http.Client{
+		CheckRedirect: policy,
+		Timeout:       3 * time.Second,
+	})
+	if client.httpClient.CheckRedirect == nil {
+		t.Fatal("Unix client discarded redirect policy")
+	}
+	if err := client.httpClient.CheckRedirect(nil, nil); !errors.Is(err, wantErr) {
+		t.Fatalf("redirect policy error = %v, want %v", err, wantErr)
+	}
+	if got := client.httpClient.Timeout; got != 3*time.Second {
+		t.Fatalf("timeout = %s, want 3s", got)
+	}
+}
+
 func TestNewSlicerClient_NormalizesUnixSocketPath(t *testing.T) {
 	home := t.TempDir()
 	originalHome := os.Getenv("HOME")

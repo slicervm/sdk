@@ -94,6 +94,11 @@ func NewSlicerClient(baseURL, token string, userAgent string, httpClient *http.C
 		client = &http.Client{
 			Transport: transport,
 		}
+		if httpClient != nil {
+			client.CheckRedirect = httpClient.CheckRedirect
+			client.Jar = httpClient.Jar
+			client.Timeout = httpClient.Timeout
+		}
 	} else {
 		// Regular TCP HTTP client
 		if httpClient == nil {
