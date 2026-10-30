@@ -6,6 +6,9 @@ or start a persistent background session for later attachment. It works with
 both Slicer on Linux and Slicer for Mac because it uses the shared HTTP API and
 supports TCP and Unix-socket transports.
 
+The guest is expected to use the standard Slicer Ubuntu layout: user and group
+ID 1000, `/home/ubuntu`, `python3`, `install`, and `arkade` must be available.
+
 It deliberately demonstrates the SDK primitives rather than reproducing the
 full `slicer claude` command. The CLI also provides cached and verified agent
 downloads, workspace and worktree transfer, safe Git configuration, friendly
@@ -62,7 +65,10 @@ is deleted after Claude exits, including when later setup or inference fails.
 `--keep` retains a one-shot VM. A successfully started `--background` session
 retains a persistent VM, including the copied credential, until you delete it.
 Failed setup or background startup is cleaned up automatically unless `--keep`
-is set; `--keep` also retains failed VMs for inspection.
+is set. More precisely, the example attempts deletion for up to 30 seconds and
+exits non-zero if the API never confirms success or `404 Not Found`; verify that
+failure manually using the printed hostname or `run=claude-...` tag. `--keep`
+also retains failed VMs for inspection.
 
 Claude runs in `/home/ubuntu/workspace`. The example creates that directory
 and records trust for that exact path so a non-interactive or background start
@@ -90,10 +96,15 @@ To start work now and attach to the same Claude session later, use Claude's
 background-session support:
 
 ```bash
-SLICER_URL=/path/to/slicer.sock \
-go run . --background --unrestricted \
-  --prompt "Review issue #123 and start reproducing it"
+printf '%s\n' 'Review issue #123 and start reproducing it' | \
+  go run . --url /path/to/slicer.sock --background --unrestricted \
+    --prompt-file -
 ```
+
+`--prompt-file -` keeps sensitive prompt text out of shell history and the
+local process list. `--prompt` is convenient for non-sensitive text, but its
+value remains visible locally even though the SDK sends it to Slicer over the
+request body rather than in the request URL.
 
 The example creates a persistent VM in this mode and prints Claude's background
 session identifier and VM hostname. Assign the printed hostname, then open a
@@ -129,6 +140,22 @@ slicer vm delete "$VM_NAME" --url https://slicer.example.com
 slicer vm delete "$VM_NAME" --url ~/slicer-mac/slicer.sock
 ```
 
+If automatic cleanup reports an error and no hostname was returned, use the
+printed run tag to find any late-created VM before deleting it:
+
+```bash
+RUN_TAG=claude-0123456789ab
+
+# Authenticated TCP API
+SLICER_TOKEN="$(sudo cat /var/lib/slicer/auth/token)" \
+slicer vm list --json --url https://slicer.example.com | \
+  jq --arg tag "run=$RUN_TAG" '.[] | select(.tags | index($tag))'
+
+# Or Slicer for Mac / an unauthenticated Unix socket
+slicer vm list --json --url ~/slicer-mac/slicer.sock | \
+  jq --arg tag "run=$RUN_TAG" '.[] | select(.tags | index($tag))'
+```
+
 An interactive implementation could instead put Claude in a named tmux session.
 In that design the tmux session is the state: the first invocation creates the
 session with the initial prompt, while subsequent invocations attach to the
@@ -138,6 +165,7 @@ Useful options:
 
 ```text
 --prompt string            Prompt to send to Claude
+--prompt-file string       Read prompt from a file, or - for stdin
 --background               Start a Claude session for later attachment
 --unrestricted             Allow tools without permission prompts
 --hostgroup string         Explicit host group

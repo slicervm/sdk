@@ -22,6 +22,7 @@ func TestValidateEndpoint(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "HTTPS", value: "https://slicer.example.com"},
+		{name: "HTTPS socket suffix", value: "https://slicer.example.com/api.sock", wantErr: true},
 		{name: "localhost", value: "http://localhost:8080"},
 		{name: "IPv4 loopback", value: "http://127.0.0.1:8080"},
 		{name: "IPv6 loopback", value: "http://[::1]:8080"},
@@ -35,6 +36,9 @@ func TestValidateEndpoint(t *testing.T) {
 		{name: "remote plaintext socket suffix", value: "http://192.0.2.1/api.sock", wantErr: true},
 		{name: "HTTPS without host", value: "https:///api", wantErr: true},
 		{name: "missing scheme", value: "slicer.example.com:8080", wantErr: true},
+		{name: "path prefix", value: "https://slicer.example.com/api", wantErr: true},
+		{name: "query", value: "https://slicer.example.com?tenant=acme", wantErr: true},
+		{name: "fragment", value: "https://slicer.example.com#api", wantErr: true},
 	}
 
 	for _, test := range tests {
@@ -47,6 +51,46 @@ func TestValidateEndpoint(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestResolvePrompt(t *testing.T) {
+	dir := t.TempDir()
+	promptFile := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(promptFile, []byte("from file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if got, err := resolvePrompt("default", promptFile, false, strings.NewReader("")); err != nil || got != "from file" {
+		t.Fatalf("file prompt = %q, %v", got, err)
+	}
+	if got, err := resolvePrompt("default", "-", false, strings.NewReader("from stdin")); err != nil || got != "from stdin" {
+		t.Fatalf("stdin prompt = %q, %v", got, err)
+	}
+	if _, err := resolvePrompt("explicit", promptFile, true, strings.NewReader("")); err == nil {
+		t.Fatal("explicit --prompt and --prompt-file should conflict")
+	}
+}
+
+func TestNoRedirectHTTPClient(t *testing.T) {
+	var targetCalls atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		targetCalls.Add(1)
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer target.Close()
+
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	defer source.Close()
+
+	client := slicer.NewSlicerClient(source.URL, "secret", "test", noRedirectHTTPClient())
+	if _, err := client.GetHostGroups(t.Context()); err == nil || !strings.Contains(err.Error(), "redirects are disabled") {
+		t.Fatalf("GetHostGroups() error = %v, want redirects disabled", err)
+	}
+	if got := targetCalls.Load(); got != 0 {
+		t.Fatalf("redirect target calls = %d, want 0", got)
 	}
 }
 
@@ -361,11 +405,12 @@ func TestDeleteVMWithRetryConfirmsLostResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodDelete && r.URL.Path == "/hostgroup/demo/nodes/demo-4":
-			deleteCalls.Add(1)
-			w.WriteHeader(http.StatusBadGateway)
-			_, _ = w.Write([]byte(`{"error":"response lost"}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/hostgroup/demo/nodes":
-			_, _ = w.Write([]byte(`[{"hostname":"unrelated","hostgroup":"demo","tags":["purpose=other"]}]`))
+			if deleteCalls.Add(1) == 1 {
+				w.WriteHeader(http.StatusBadGateway)
+				_, _ = w.Write([]byte(`{"error":"response lost"}`))
+				return
+			}
+			http.Error(w, "not found", http.StatusNotFound)
 		default:
 			http.Error(w, "unexpected request", http.StatusNotFound)
 		}
@@ -379,13 +424,12 @@ func TestDeleteVMWithRetryConfirmsLostResponse(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := deleteCalls.Load(); got != 2 {
-		t.Fatalf("delete calls = %d, want 2 stable absence observations", got)
+		t.Fatalf("delete calls = %d, want retry ending in 404", got)
 	}
 }
 
-func TestDeleteVMWithRetryRejectsSingleStaleAbsence(t *testing.T) {
+func TestDeleteVMWithRetryWaitsForDefinitiveSuccess(t *testing.T) {
 	var deleteCalls atomic.Int32
-	var listCalls atomic.Int32
 	const runTag = "claude-stale-list-test"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -396,12 +440,6 @@ func TestDeleteVMWithRetryRejectsSingleStaleAbsence(t *testing.T) {
 			}
 			w.WriteHeader(http.StatusBadGateway)
 			_, _ = w.Write([]byte(`{"error":"response lost"}`))
-		case r.Method == http.MethodGet && r.URL.Path == "/hostgroup/demo/nodes":
-			if listCalls.Add(1) == 1 {
-				_, _ = w.Write([]byte(`[]`))
-				return
-			}
-			_, _ = w.Write([]byte(`[{"hostname":"demo-5","hostgroup":"demo","tags":["run=claude-stale-list-test"]}]`))
 		default:
 			http.Error(w, "unexpected request", http.StatusNotFound)
 		}
@@ -415,9 +453,6 @@ func TestDeleteVMWithRetryRejectsSingleStaleAbsence(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := deleteCalls.Load(); got != 3 {
-		t.Fatalf("delete calls = %d, want retry after stale absence", got)
-	}
-	if got := listCalls.Load(); got != 2 {
-		t.Fatalf("list calls = %d, want stale absence followed by presence", got)
+		t.Fatalf("delete calls = %d, want retries ending in success", got)
 	}
 }

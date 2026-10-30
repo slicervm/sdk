@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"math"
 	"net"
 	"net/http"
@@ -41,6 +42,8 @@ type options struct {
 	credentials       string
 	settings          string
 	prompt            string
+	promptFile        string
+	promptExplicit    bool
 	background        bool
 	unrestricted      bool
 	keep              bool
@@ -59,6 +62,7 @@ func main() {
 	flag.StringVar(&opts.credentials, "credentials-file", os.Getenv("CLAUDE_CREDENTIALS_FILE"), "Claude credentials file (defaults to ~/.claude/.credentials.json or the macOS Keychain)")
 	flag.StringVar(&opts.settings, "settings-file", os.Getenv("CLAUDE_SETTINGS_FILE"), "optional Claude settings file to copy into the VM")
 	flag.StringVar(&opts.prompt, "prompt", envOrDefault("CLAUDE_PROMPT", "What is my username? Reply with the username only."), "prompt to send to Claude")
+	flag.StringVar(&opts.promptFile, "prompt-file", "", "read the Claude prompt from a file, or - for stdin")
 	flag.BoolVar(&opts.background, "background", false, "start a background Claude session that can be attached to later")
 	flag.BoolVar(&opts.unrestricted, "unrestricted", false, "allow Claude to run tools without permission prompts")
 	flag.BoolVar(&opts.keep, "keep", false, "keep the VM after the command finishes")
@@ -74,6 +78,8 @@ func main() {
 		switch value.Name {
 		case "token-file":
 			opts.tokenFileExplicit = true
+		case "prompt":
+			opts.promptExplicit = true
 		}
 	})
 
@@ -97,6 +103,11 @@ func runWithContext(parent context.Context, opts options) (runErr error) {
 	if strings.TrimSpace(opts.baseURL) == "" {
 		return fmt.Errorf("--url or SLICER_URL is required")
 	}
+	prompt, err := resolvePrompt(opts.prompt, opts.promptFile, opts.promptExplicit, os.Stdin)
+	if err != nil {
+		return err
+	}
+	opts.prompt = prompt
 	if strings.TrimSpace(opts.prompt) == "" {
 		return fmt.Errorf("--prompt must not be empty")
 	}
@@ -128,7 +139,7 @@ func runWithContext(parent context.Context, opts options) (runErr error) {
 	}
 	defer cleanupCredentials()
 
-	client := slicer.NewSlicerClient(baseURL, token, "slicer-claude-example/2.0", nil)
+	client := slicer.NewSlicerClient(baseURL, token, "slicer-claude-example/2.0", noRedirectHTTPClient())
 	hostGroup, err := selectHostGroup(ctx, client, opts.hostGroup)
 	if err != nil {
 		return err
@@ -242,6 +253,36 @@ func validatePositionalArgs(args []string) error {
 	return nil
 }
 
+func resolvePrompt(prompt, promptFile string, promptExplicit bool, stdin io.Reader) (string, error) {
+	if promptFile == "" {
+		return prompt, nil
+	}
+	if promptExplicit {
+		return "", fmt.Errorf("--prompt and --prompt-file cannot be used together")
+	}
+	var (
+		raw []byte
+		err error
+	)
+	if promptFile == "-" {
+		raw, err = io.ReadAll(stdin)
+	} else {
+		raw, err = os.ReadFile(expandPath(promptFile))
+	}
+	if err != nil {
+		return "", fmt.Errorf("read Claude prompt: %w", err)
+	}
+	return string(raw), nil
+}
+
+func noRedirectHTTPClient() *http.Client {
+	return &http.Client{
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return fmt.Errorf("Slicer API redirects are disabled")
+		},
+	}
+}
+
 func validateEndpoint(baseURL string) error {
 	value := strings.TrimSpace(baseURL)
 	if strings.HasPrefix(value, "unix://") {
@@ -262,6 +303,12 @@ func validateEndpoint(baseURL string) error {
 	parsed, err := url.Parse(value)
 	if err != nil {
 		return fmt.Errorf("parse Slicer API URL: %w", err)
+	}
+	if parsed.Path != "" && parsed.Path != "/" {
+		return fmt.Errorf("Slicer API endpoint %q must not contain a path prefix", value)
+	}
+	if parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("Slicer API endpoint %q must not contain a query or fragment", value)
 	}
 	switch parsed.Scheme {
 	case "https":
@@ -364,11 +411,9 @@ func deleteVMsByRunTag(ctx context.Context, client *slicer.SlicerClient, hostGro
 }
 
 func deleteVMWithRetry(ctx context.Context, client *slicer.SlicerClient, hostGroup, hostname, runTag string) error {
-	tag := "run=" + runTag
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 	var lastErr error
-	absentObservations := 0
 	for {
 		if _, err := client.DeleteVM(ctx, hostGroup, hostname); err == nil || slicer.IsAPIStatus(err, http.StatusNotFound) {
 			return nil
@@ -378,31 +423,7 @@ func deleteVMWithRetry(ctx context.Context, client *slicer.SlicerClient, hostGro
 			lastErr = err
 		}
 
-		nodes, err := client.GetHostGroupNodes(ctx, hostGroup, slicer.ListOptions{Tag: tag})
-		if err != nil {
-			if !retryableAPIError(err) {
-				return err
-			}
-			lastErr = err
-		} else {
-			found := false
-			for _, node := range nodes {
-				if node.Hostname == hostname && contains(node.Tags, tag) {
-					found = true
-					break
-				}
-			}
-			if !found {
-				absentObservations++
-				if absentObservations >= 2 {
-					return nil
-				}
-			} else {
-				absentObservations = 0
-			}
-		}
-
-		if err := waitForRetry(ctx, ticker.C, tag, lastErr); err != nil {
+		if err := waitForRetry(ctx, ticker.C, "run="+runTag, lastErr); err != nil {
 			return err
 		}
 	}
