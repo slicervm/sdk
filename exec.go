@@ -178,6 +178,10 @@ type RemoteCmd struct {
 
 	// resultChan receives results from the streaming exec
 	resultChan chan SlicerExecWriteResult
+
+	// streamDone reports whether the response stream ended cleanly or because
+	// its request context was cancelled.
+	streamDone <-chan error
 }
 
 // Command returns a RemoteCmd to execute the named program on the specified VM.
@@ -258,11 +262,12 @@ func (c *RemoteCmd) Start() error {
 	}
 
 	// Start the async execution
-	resChan, err := c.execAsync(c.ctx, execReq)
+	resChan, streamDone, err := c.execAsync(c.ctx, execReq)
 	if err != nil {
 		return err
 	}
 	c.resultChan = resChan
+	c.streamDone = streamDone
 
 	// Start a goroutine to process results
 	go c.processResults()
@@ -430,7 +435,7 @@ func (c *RemoteCmd) Environ() []string {
 // execAsync executes the command and returns a channel for streaming results.
 // This is an internal method that wraps the lower-level Exec functionality
 // but allows for custom stdin handling.
-func (c *RemoteCmd) execAsync(ctx context.Context, execReq SlicerExecRequest) (chan SlicerExecWriteResult, error) {
+func (c *RemoteCmd) execAsync(ctx context.Context, execReq SlicerExecRequest) (chan SlicerExecWriteResult, <-chan error, error) {
 	// Use the existing Exec method but we need to handle stdin differently
 	// For now, we create a modified exec request
 
@@ -439,7 +444,7 @@ func (c *RemoteCmd) execAsync(ctx context.Context, execReq SlicerExecRequest) (c
 		execReq.Stdin = true
 	}
 
-	return c.client.ExecWithReader(ctx, c.vmName, execReq, c.Stdin)
+	return c.client.execWithReader(ctx, c.vmName, execReq, c.Stdin)
 }
 
 // processResults processes the streaming results from the exec channel
@@ -459,7 +464,6 @@ func (c *RemoteCmd) processResults() {
 	var exitCode int
 	var hasError bool
 	var errorMsg string
-	var sawExit bool
 
 	for result := range c.resultChan {
 		switch result.Type {
@@ -494,7 +498,6 @@ func (c *RemoteCmd) processResults() {
 
 		// Exit frame carries command exit data.
 		if result.Type == "exit" {
-			sawExit = true
 			if result.Pid > 0 {
 				// keep pid if we did not receive a started frame
 				c.ProcessState = &RemoteProcessState{exited: false, pid: result.Pid}
@@ -517,10 +520,7 @@ func (c *RemoteCmd) processResults() {
 			}
 		}
 	}
-	if !sawExit && c.ctx.Err() != nil {
-		c.waitErr = c.ctx.Err()
-		return
-	}
+	streamErr := <-c.streamDone
 
 	var pid int
 	pid = -1
@@ -534,6 +534,10 @@ func (c *RemoteCmd) processResults() {
 		exitCode: exitCode,
 		exited:   true,
 		pid:      pid,
+	}
+	if streamErr != nil {
+		c.waitErr = streamErr
+		return
 	}
 
 	// Set wait error if there was a failure
@@ -552,7 +556,18 @@ func (c *RemoteCmd) processResults() {
 // ExecWithReader is like Exec but accepts a custom io.Reader for stdin
 // instead of using os.Stdin.
 func (c *SlicerClient) ExecWithReader(ctx context.Context, nodeName string, execReq SlicerExecRequest, stdin io.Reader) (chan SlicerExecWriteResult, error) {
+	resChan, _, err := c.execWithReader(ctx, nodeName, execReq, stdin)
+	return resChan, err
+}
+
+func (c *SlicerClient) execWithReader(ctx context.Context, nodeName string, execReq SlicerExecRequest, stdin io.Reader) (chan SlicerExecWriteResult, <-chan error, error) {
 	resChan := make(chan SlicerExecWriteResult)
+	streamDone := make(chan error, 1)
+	fail := func(err error) (chan SlicerExecWriteResult, <-chan error, error) {
+		close(resChan)
+		close(streamDone)
+		return resChan, streamDone, err
+	}
 
 	command := execReq.Command
 	args := execReq.Args
@@ -566,7 +581,7 @@ func (c *SlicerClient) ExecWithReader(ctx context.Context, nodeName string, exec
 	q := url.Values{}
 	q.Set("cmd", command)
 	if err := setExecStdioQuery(q, execReq); err != nil {
-		return resChan, err
+		return fail(err)
 	}
 
 	for _, arg := range args {
@@ -604,13 +619,13 @@ func (c *SlicerClient) ExecWithReader(ctx context.Context, nodeName string, exec
 
 	u, err := url.Parse(c.baseURL)
 	if err != nil {
-		return resChan, fmt.Errorf("failed to parse API URL: %w", err)
+		return fail(fmt.Errorf("failed to parse API URL: %w", err))
 	}
 	u.Path = fmt.Sprintf("/vm/%s/exec", nodeName)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), bodyReader)
 	if err != nil {
-		return resChan, fmt.Errorf("failed to create request: %w", err)
+		return fail(fmt.Errorf("failed to create request: %w", err))
 	}
 
 	req.Header.Set("Authorization", "Bearer "+c.token)
@@ -619,7 +634,7 @@ func (c *SlicerClient) ExecWithReader(ctx context.Context, nodeName string, exec
 
 	res, err := c.httpClient.Do(req)
 	if err != nil {
-		return resChan, fmt.Errorf("failed to execute request: %w", err)
+		return fail(fmt.Errorf("failed to execute request: %w", err))
 	}
 
 	if res.StatusCode != http.StatusOK {
@@ -631,22 +646,28 @@ func (c *SlicerClient) ExecWithReader(ctx context.Context, nodeName string, exec
 			}()
 			body, _ = io.ReadAll(res.Body)
 		}
-		return resChan, fmt.Errorf("failed to execute command: %s %s", res.Status, string(body))
+		return fail(fmt.Errorf("failed to execute command: %s %s", res.Status, string(body)))
 	}
 
 	if res.Body == nil {
-		return resChan, fmt.Errorf("no body received from VM")
+		return fail(fmt.Errorf("no body received from VM"))
 	}
 
 	go func() {
 		r := bufio.NewReader(res.Body)
+		var streamErr error
 
 		defer res.Body.Close()
-		defer close(resChan)
+		defer func() {
+			streamDone <- streamErr
+			close(streamDone)
+			close(resChan)
+		}()
 
 		for {
 			select {
 			case <-ctx.Done():
+				streamErr = ctx.Err()
 				return
 			default:
 			}
@@ -665,6 +686,10 @@ func (c *SlicerClient) ExecWithReader(ctx context.Context, nodeName string, exec
 			}
 
 			if err != nil {
+				if ctx.Err() != nil {
+					streamErr = ctx.Err()
+					return
+				}
 				resChan <- SlicerExecWriteResult{
 					Timestamp: time.Now(),
 					Error:     fmt.Sprintf("failed to read response: %v", err),
@@ -698,5 +723,5 @@ func (c *SlicerClient) ExecWithReader(ctx context.Context, nodeName string, exec
 		}
 	}()
 
-	return resChan, nil
+	return resChan, streamDone, nil
 }
