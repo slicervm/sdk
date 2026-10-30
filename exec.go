@@ -681,6 +681,9 @@ func (c *SlicerClient) execWithReader(ctx context.Context, nodeName string, exec
 
 			line, err := r.ReadBytes('\n')
 			if err == io.EOF {
+				if ctx.Err() != nil {
+					streamErr = ctx.Err()
+				}
 				// Handle any remaining data before EOF
 				if len(line) > 0 {
 					var result SlicerExecWriteResult

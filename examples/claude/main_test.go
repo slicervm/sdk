@@ -378,7 +378,46 @@ func TestDeleteVMWithRetryConfirmsLostResponse(t *testing.T) {
 	if err := deleteVMWithRetry(ctx, client, "demo", "demo-4", "claude-normal-cleanup-test"); err != nil {
 		t.Fatal(err)
 	}
-	if got := deleteCalls.Load(); got != 1 {
-		t.Fatalf("delete calls = %d, want 1", got)
+	if got := deleteCalls.Load(); got != 2 {
+		t.Fatalf("delete calls = %d, want 2 stable absence observations", got)
+	}
+}
+
+func TestDeleteVMWithRetryRejectsSingleStaleAbsence(t *testing.T) {
+	var deleteCalls atomic.Int32
+	var listCalls atomic.Int32
+	const runTag = "claude-stale-list-test"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodDelete && r.URL.Path == "/hostgroup/demo/nodes/demo-5":
+			if deleteCalls.Add(1) >= 3 {
+				_, _ = w.Write([]byte(`{"message":"deleted"}`))
+				return
+			}
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte(`{"error":"response lost"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/hostgroup/demo/nodes":
+			if listCalls.Add(1) == 1 {
+				_, _ = w.Write([]byte(`[]`))
+				return
+			}
+			_, _ = w.Write([]byte(`[{"hostname":"demo-5","hostgroup":"demo","tags":["run=claude-stale-list-test"]}]`))
+		default:
+			http.Error(w, "unexpected request", http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client := slicer.NewSlicerClient(server.URL, "", "test", server.Client())
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	if err := deleteVMWithRetry(ctx, client, "demo", "demo-5", runTag); err != nil {
+		t.Fatal(err)
+	}
+	if got := deleteCalls.Load(); got != 3 {
+		t.Fatalf("delete calls = %d, want retry after stale absence", got)
+	}
+	if got := listCalls.Load(); got != 2 {
+		t.Fatalf("list calls = %d, want stale absence followed by presence", got)
 	}
 }
