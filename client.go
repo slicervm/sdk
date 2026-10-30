@@ -400,7 +400,7 @@ func (c *SlicerClient) CreateVMWithOptions(ctx context.Context, groupName string
 	}
 
 	if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusCreated {
-		return nil, fmt.Errorf("API request failed: %s - %s", res.Status, string(body))
+		return nil, newAPIError(res, body)
 	}
 
 	var result SlicerCreateNodeResponse

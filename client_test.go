@@ -479,6 +479,23 @@ func TestCreateVMWithOptions_InvalidWait(t *testing.T) {
 	}
 }
 
+func TestCreateVMWithOptions_APIError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusRequestTimeout)
+		_, _ = io.WriteString(w, `{"error":"wait timed out"}`)
+	}))
+	defer server.Close()
+
+	client := NewSlicerClient(server.URL, "", "test-agent", nil)
+	_, err := client.CreateVMWithOptions(t.Context(), "vm", SlicerCreateNodeRequest{}, SlicerCreateNodeOptions{
+		Wait:    SlicerCreateNodeWaitAgent,
+		Timeout: time.Second,
+	})
+	if !IsAPIStatus(err, http.StatusRequestTimeout) {
+		t.Fatalf("CreateVMWithOptions() error = %v, want typed 408", err)
+	}
+}
+
 func TestCreateVMWithOptions_PreservesExplicitEmptyNetworkList(t *testing.T) {
 	empty := []string{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
