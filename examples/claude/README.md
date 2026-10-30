@@ -50,9 +50,10 @@ The example looks for credentials in this order:
 3. the `Claude Code-credentials` item in the macOS Keychain
 
 It copies the credential into the VM as
-`/home/ubuntu/.claude/.credentials.json`, mode `0600`. The VM is deleted after
-Claude exits, including when setup or inference fails. Use `--keep` only when
-you deliberately want to retain the VM and its copied credential.
+`/home/ubuntu/.claude/.credentials.json`, mode `0600`. In one-shot mode, the VM
+is deleted after Claude exits, including when later setup or inference fails.
+`--keep` retains a one-shot VM. `--background` always retains a persistent VM,
+including the copied credential, until you delete it.
 
 Claude runs in `/home/ubuntu/workspace`. The example creates that directory
 and records trust for that exact path so a non-interactive or background start
@@ -66,9 +67,10 @@ reviewed settings file is required inside the VM.
 
 ## Prompt and session behaviour
 
-`--prompt` performs one new, headless Claude invocation. It is not written to
-`run.sh`, stored in the VM, or replayed if the VM or daemon is restarted.
-Running the example again creates a fresh VM and a fresh Claude conversation.
+`--prompt` performs one new, headless Claude invocation. The example does not
+write it to `run.sh`, keep its own task record, or replay it if the VM or daemon
+is restarted. Running the example again creates a fresh VM and a fresh Claude
+conversation.
 
 This separation is intentional: an interactive bootstrap script and a queued
 task have different lifecycle and retry semantics. A service that needs
@@ -85,8 +87,16 @@ go run . --background --prompt "Review issue #123 and start reproducing it"
 
 The example creates a persistent VM in this mode and prints Claude's background
 session identifier. Open a shell into the VM later, then use `claude agents`
-and `claude attach <id>`. The prompt is submitted once by Claude; it is not
-replayed by Slicer when the VM is relaunched.
+and `claude attach <id>`. Claude retains its own session and prompt state inside
+the VM so that logs and attachment work. The prompt is submitted once; Slicer
+does not replay it when the VM is relaunched.
+
+The retained VM also contains the copied Claude credential. Delete it when the
+session is no longer required:
+
+```bash
+slicer vm delete <hostname> --url "$SLICER_URL"
+```
 
 An interactive implementation could instead put Claude in a named tmux session.
 In that design the tmux session is the state: the first invocation creates the
