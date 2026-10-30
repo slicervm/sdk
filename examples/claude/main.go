@@ -210,14 +210,12 @@ func createVM(ctx context.Context, client *slicer.SlicerClient, hostGroup, runTa
 	}
 
 	createErr := fmt.Errorf("create VM: %w", err)
-	waitForVM := ambiguousCreateFailure(err)
-	cleanupTimeout := time.Minute
-	if waitForVM {
-		cleanupTimeout = 30 * time.Second
+	if !ambiguousCreateFailure(err) {
+		return nil, createErr
 	}
-	cleanupCtx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if cleanupErr := deleteVMsByRunTag(cleanupCtx, client, hostGroup, runTag, waitForVM); cleanupErr != nil {
+	if cleanupErr := deleteVMsByRunTag(cleanupCtx, client, hostGroup, runTag); cleanupErr != nil {
 		return nil, errors.Join(createErr, fmt.Errorf("reconcile failed create: %w", cleanupErr))
 	}
 	return nil, createErr
@@ -233,44 +231,69 @@ func ambiguousCreateFailure(err error) bool {
 		apiErr.StatusCode == http.StatusRequestTimeout
 }
 
-func deleteVMsByRunTag(ctx context.Context, client *slicer.SlicerClient, hostGroup, runTag string, waitForVM bool) error {
+func deleteVMsByRunTag(ctx context.Context, client *slicer.SlicerClient, hostGroup, runTag string) error {
 	tag := "run=" + runTag
-	ticker := time.NewTicker(100 * time.Millisecond)
+	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
+	deleteAttempted := false
+	var lastErr error
 	for {
-		nodes, err := client.GetHostGroupNodes(ctx, hostGroup)
+		nodes, err := client.GetHostGroupNodes(ctx, hostGroup, slicer.ListOptions{Tag: tag})
 		if err != nil {
-			return fmt.Errorf("list VMs while looking for tag %s: %w", tag, err)
+			if !retryableAPIError(err) {
+				return fmt.Errorf("list VMs while looking for tag %s: %w", tag, err)
+			}
+			lastErr = err
+			if err := waitForRetry(ctx, ticker.C, tag, lastErr); err != nil {
+				return err
+			}
+			continue
 		}
 		found := false
+		retry := false
 		for _, node := range nodes {
-			if !contains(node.Tags, tag) {
-				continue
-			}
 			found = true
+			deleteAttempted = true
 			if _, err := client.DeleteVM(ctx, hostGroup, node.Hostname); err != nil {
-				return fmt.Errorf("delete VM %s: %w", node.Hostname, err)
+				if !retryableAPIError(err) {
+					return fmt.Errorf("delete VM %s: %w", node.Hostname, err)
+				}
+				lastErr = err
+				retry = true
 			}
 		}
-		if found || !waitForVM {
+		if found && !retry {
 			return nil
 		}
-
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("VM tagged %s did not appear before cleanup deadline: %w", tag, ctx.Err())
-		case <-ticker.C:
+		if !found && deleteAttempted {
+			return nil
+		}
+		if err := waitForRetry(ctx, ticker.C, tag, lastErr); err != nil {
+			return err
 		}
 	}
 }
 
-func contains(values []string, expected string) bool {
-	for _, value := range values {
-		if value == expected {
-			return true
+func waitForRetry(ctx context.Context, retry <-chan time.Time, tag string, lastErr error) error {
+	select {
+	case <-ctx.Done():
+		if lastErr != nil {
+			return errors.Join(fmt.Errorf("VM tagged %s was not reconciled before cleanup deadline: %w", tag, ctx.Err()), lastErr)
 		}
+		return fmt.Errorf("VM tagged %s did not appear before cleanup deadline: %w", tag, ctx.Err())
+	case <-retry:
+		return nil
 	}
-	return false
+}
+
+func retryableAPIError(err error) bool {
+	var apiErr *slicer.APIError
+	if !errors.As(err, &apiErr) {
+		return true
+	}
+	return apiErr.StatusCode == http.StatusRequestTimeout ||
+		apiErr.StatusCode == http.StatusTooManyRequests ||
+		apiErr.StatusCode >= http.StatusInternalServerError
 }
 
 func serverWaitTimeout(ctx context.Context) (time.Duration, error) {

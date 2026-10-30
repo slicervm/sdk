@@ -52,8 +52,9 @@ The example looks for credentials in this order:
 It copies the credential into the VM as
 `/home/ubuntu/.claude/.credentials.json`, mode `0600`. In one-shot mode, the VM
 is deleted after Claude exits, including when later setup or inference fails.
-`--keep` retains a one-shot VM. `--background` always retains a persistent VM,
-including the copied credential, until you delete it.
+`--keep` retains a one-shot VM. A successfully started `--background` session
+retains a persistent VM, including the copied credential, until you delete it.
+Failed setup or background startup is cleaned up automatically.
 
 Claude runs in `/home/ubuntu/workspace`. The example creates that directory
 and records trust for that exact path so a non-interactive or background start

@@ -209,6 +209,7 @@ func TestCreateVMReconcilesAfterClientDeadline(t *testing.T) {
 func TestCreateVMReconcilesAfterGatewayFailure(t *testing.T) {
 	var created atomic.Bool
 	var deleted atomic.Bool
+	var listCalls atomic.Int32
 	const runTag = "claude-gateway-failure-test"
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -221,6 +222,15 @@ func TestCreateVMReconcilesAfterGatewayFailure(t *testing.T) {
 			w.WriteHeader(http.StatusBadGateway)
 			_, _ = w.Write([]byte(`{"error":"upstream response lost"}`))
 		case r.Method == http.MethodGet && r.URL.Path == "/hostgroup/demo/nodes":
+			if listCalls.Add(1) == 1 {
+				w.WriteHeader(http.StatusBadGateway)
+				_, _ = w.Write([]byte(`{"error":"temporary list failure"}`))
+				return
+			}
+			if deleted.Load() {
+				_, _ = w.Write([]byte(`[]`))
+				return
+			}
 			if !created.Load() {
 				_, _ = w.Write([]byte(`[]`))
 				return
@@ -228,7 +238,8 @@ func TestCreateVMReconcilesAfterGatewayFailure(t *testing.T) {
 			_, _ = w.Write([]byte(`[{"hostname":"demo-3","hostgroup":"demo","tags":["run=claude-gateway-failure-test"]}]`))
 		case r.Method == http.MethodDelete && r.URL.Path == "/hostgroup/demo/nodes/demo-3":
 			deleted.Store(true)
-			_, _ = w.Write([]byte(`{"message":"deleted"}`))
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte(`{"error":"delete response lost"}`))
 		default:
 			http.Error(w, "unexpected request", http.StatusNotFound)
 		}
