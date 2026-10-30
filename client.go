@@ -180,7 +180,12 @@ func (c *SlicerClient) makeJSONRequestWithContext(ctx context.Context, method, e
 	if err != nil {
 		return nil, fmt.Errorf("invalid base URL: %w", err)
 	}
-	u.Path = path.Join(u.Path, endpoint)
+	endpointURL, err := url.Parse(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("invalid endpoint: %w", err)
+	}
+	u.Path = path.Join(u.Path, endpointURL.Path)
+	u.RawQuery = endpointURL.RawQuery
 
 	var reqBody io.Reader
 	if body != nil {
@@ -250,7 +255,7 @@ func (c *SlicerClient) GetHostGroups(ctx context.Context) ([]SlicerHostGroup, er
 	}
 
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API request failed: %s - %s", res.Status, string(body))
+		return nil, newAPIError(res, body)
 	}
 
 	var hostGroups []SlicerHostGroup
@@ -314,7 +319,7 @@ func (c *SlicerClient) GetHostGroupNodes(ctx context.Context, groupName string, 
 	}
 
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API request failed: %s - %s", res.Status, string(body))
+		return nil, newAPIError(res, body)
 	}
 
 	var nodes []SlicerNode

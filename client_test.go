@@ -445,6 +445,24 @@ func TestCreateVMWithOptions_WaitQuery(t *testing.T) {
 	}
 }
 
+func TestGetHostGroupNodes_FilterQuery(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/hostgroup/vm/nodes" {
+			t.Fatalf("path = %q, want /hostgroup/vm/nodes", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("tag"); got != "run=claude-test" {
+			t.Fatalf("tag = %q, want run=claude-test", got)
+		}
+		_, _ = io.WriteString(w, `[]`)
+	}))
+	defer server.Close()
+
+	client := NewSlicerClient(server.URL, "", "test-agent", nil)
+	if _, err := client.GetHostGroupNodes(t.Context(), "vm", ListOptions{Tag: "run=claude-test"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCreateVMWithOptions_InvalidWait(t *testing.T) {
 	client := NewSlicerClient("http://unused", "token", "test-agent", nil)
 	_, err := client.CreateVMWithOptions(context.Background(), "vm", SlicerCreateNodeRequest{}, SlicerCreateNodeOptions{
