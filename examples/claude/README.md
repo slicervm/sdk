@@ -11,6 +11,12 @@ full `slicer claude` command. The CLI also provides cached and verified agent
 downloads, workspace and worktree transfer, safe Git configuration, friendly
 VM names, interactive and tmux sessions, reattachment, and setup rollback.
 
+By default, Claude keeps its normal permission policy. The commands below use
+`--unrestricted` when the prompt needs shell or file tools. This passes
+Claude's `--dangerously-skip-permissions` option. Use it only with prompts,
+workspace contents, and settings you trust: Claude can run commands without a
+confirmation prompt, read the copied credential, and use the VM's network.
+
 ## Run with Slicer on Linux
 
 For a TCP API with authentication enabled:
@@ -18,14 +24,15 @@ For a TCP API with authentication enabled:
 ```bash
 SLICER_URL=https://slicer.example.com \
 SLICER_TOKEN="$(sudo cat /var/lib/slicer/auth/token)" \
-go run . --prompt "Summarise the VM's CPU, memory, kernel, and operating system"
+go run . --unrestricted \
+  --prompt "Summarise the VM's CPU, memory, kernel, and operating system"
 ```
 
 For an unauthenticated Unix socket, omit the token:
 
 ```bash
 SLICER_URL=/path/to/slicer.sock \
-go run . --prompt "What kernel version is this VM running?"
+go run . --unrestricted --prompt "What kernel version is this VM running?"
 ```
 
 ## Run with Slicer for Mac
@@ -36,7 +43,7 @@ group automatically:
 
 ```bash
 SLICER_URL=~/slicer-mac/slicer.sock \
-go run . --prompt "What architecture is this VM using?"
+go run . --unrestricted --prompt "What architecture is this VM using?"
 ```
 
 Use `--hostgroup` or `SLICER_HOST_GROUP` to override host-group selection.
@@ -84,7 +91,8 @@ background-session support:
 
 ```bash
 SLICER_URL=/path/to/slicer.sock \
-go run . --background --prompt "Review issue #123 and start reproducing it"
+go run . --background --unrestricted \
+  --prompt "Review issue #123 and start reproducing it"
 ```
 
 The example creates a persistent VM in this mode and prints Claude's background
@@ -131,6 +139,7 @@ Useful options:
 ```text
 --prompt string            Prompt to send to Claude
 --background               Start a Claude session for later attachment
+--unrestricted             Allow tools without permission prompts
 --hostgroup string         Explicit host group
 --credentials-file string  Claude credentials file
 --settings-file string     Optional reviewed Claude settings file

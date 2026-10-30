@@ -186,14 +186,7 @@ func (c *SlicerClient) makeJSONRequestWithContextAndQuery(ctx context.Context, m
 	}
 	u.Path = path.Join(u.Path, endpoint)
 	if len(query) > 0 {
-		merged := u.Query()
-		for key, values := range query {
-			merged.Del(key)
-			for _, value := range values {
-				merged.Add(key, value)
-			}
-		}
-		u.RawQuery = merged.Encode()
+		u.RawQuery = mergeURLQuery(u.Query(), query).Encode()
 	}
 
 	var reqBody io.Reader
@@ -222,6 +215,20 @@ func (c *SlicerClient) makeJSONRequestWithContextAndQuery(ctx context.Context, m
 	}
 
 	return c.httpClient.Do(req)
+}
+
+func mergeURLQuery(base, override url.Values) url.Values {
+	if override.Has("tag") || override.Has("tag_prefix") {
+		base.Del("tag")
+		base.Del("tag_prefix")
+	}
+	for key, values := range override {
+		base.Del(key)
+		for _, value := range values {
+			base.Add(key, value)
+		}
+	}
+	return base
 }
 
 // resolveDefaultHostGroup returns the name of the only configured host group.
@@ -1013,14 +1020,7 @@ func (c *SlicerClient) ListVMs(ctx context.Context, opts ...ListOptions) ([]Slic
 
 	u.Path = "/nodes"
 	if query := firstListOption(opts).query(); len(query) > 0 {
-		merged := u.Query()
-		for key, values := range query {
-			merged.Del(key)
-			for _, value := range values {
-				merged.Add(key, value)
-			}
-		}
-		u.RawQuery = merged.Encode()
+		u.RawQuery = mergeURLQuery(u.Query(), query).Encode()
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)

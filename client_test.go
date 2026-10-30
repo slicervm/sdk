@@ -480,11 +480,14 @@ func TestGetHostGroupNodes_FilterQuery(t *testing.T) {
 		if got := r.URL.Query().Get("tenant"); got != "acme" {
 			t.Fatalf("tenant = %q, want acme", got)
 		}
+		if got := r.URL.Query().Get("tag_prefix"); got != "" {
+			t.Fatalf("tag_prefix = %q, want it removed when tag is supplied", got)
+		}
 		_, _ = io.WriteString(w, `[]`)
 	}))
 	defer server.Close()
 
-	client := NewSlicerClient(server.URL+"?tenant=acme", "", "test-agent", nil)
+	client := NewSlicerClient(server.URL+"?tenant=acme&tag_prefix=run%3D", "", "test-agent", nil)
 	if _, err := client.GetHostGroupNodes(t.Context(), "vm", ListOptions{Tag: "run=claude-test"}); err != nil {
 		t.Fatal(err)
 	}

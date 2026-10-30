@@ -420,6 +420,15 @@ func TestRemoteCmd_ContextCancellationAfterOutput(t *testing.T) {
 	if !strings.Contains(string(output), "partial output") {
 		t.Fatalf("CombinedOutput() = %q, want partial output", output)
 	}
+	if cmd.ProcessState == nil {
+		t.Fatal("ProcessState is nil")
+	}
+	if cmd.ProcessState.Exited() || cmd.ProcessState.Success() {
+		t.Fatalf("canceled process state = %v, want not exited and unsuccessful", cmd.ProcessState)
+	}
+	if got := cmd.ProcessState.ExitCode(); got != -1 {
+		t.Fatalf("ExitCode() = %d, want -1", got)
+	}
 }
 
 func TestRemoteCmd_ExitFrameWinsOverLaterCancellation(t *testing.T) {

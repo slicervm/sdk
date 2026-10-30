@@ -42,6 +42,7 @@ type options struct {
 	settings          string
 	prompt            string
 	background        bool
+	unrestricted      bool
 	keep              bool
 	timeout           time.Duration
 	cpus              int
@@ -59,6 +60,7 @@ func main() {
 	flag.StringVar(&opts.settings, "settings-file", os.Getenv("CLAUDE_SETTINGS_FILE"), "optional Claude settings file to copy into the VM")
 	flag.StringVar(&opts.prompt, "prompt", envOrDefault("CLAUDE_PROMPT", "What is my username? Reply with the username only."), "prompt to send to Claude")
 	flag.BoolVar(&opts.background, "background", false, "start a background Claude session that can be attached to later")
+	flag.BoolVar(&opts.unrestricted, "unrestricted", false, "allow Claude to run tools without permission prompts")
 	flag.BoolVar(&opts.keep, "keep", false, "keep the VM after the command finishes")
 	flag.DurationVar(&opts.timeout, "timeout", 10*time.Minute, "overall timeout for provisioning and inference")
 	flag.IntVar(&opts.cpus, "cpus", 2, "VM CPU count")
@@ -176,12 +178,15 @@ func runWithContext(parent context.Context, opts options) (runErr error) {
 		}
 	}()
 
-	if err := configureClaude(ctx, client, node.Hostname, credentials, opts.settings); err != nil {
+	if err := configureClaude(ctx, client, node.Hostname, credentials, opts.settings, opts.unrestricted); err != nil {
 		return err
 	}
 
 	fmt.Printf("Running Claude in %s\n", node.Hostname)
-	claudeArgs := []string{"--dangerously-skip-permissions"}
+	claudeArgs := []string{}
+	if opts.unrestricted {
+		claudeArgs = append(claudeArgs, "--dangerously-skip-permissions")
+	}
 	if opts.background {
 		claudeArgs = append(claudeArgs, "--background")
 	} else {
@@ -449,7 +454,7 @@ func serverWaitTimeout(ctx context.Context) (time.Duration, error) {
 	return wait, nil
 }
 
-func configureClaude(ctx context.Context, client *slicer.SlicerClient, vmName, credentials, settings string) error {
+func configureClaude(ctx context.Context, client *slicer.SlicerClient, vmName, credentials, settings string, unrestricted bool) error {
 	prepare := client.CommandContext(ctx, vmName, "install", "-d", "-m", "0700", "-o", "1000", "-g", "1000", "/home/ubuntu/.claude", guestWorkspace)
 	if output, err := prepare.CombinedOutput(); err != nil {
 		return commandError("prepare Claude directory", output, err)
@@ -469,14 +474,20 @@ func configureClaude(ctx context.Context, client *slicer.SlicerClient, vmName, c
 		}
 	}
 
-	const acceptSandbox = `import json, os
+	permissionAcceptance := ""
+	if unrestricted {
+		permissionAcceptance = `data["bypassPermissionsModeAccepted"] = True
+`
+	}
+	const preferencesPrefix = `import json, os
 p = os.path.expanduser("~/.claude.json")
 try:
     with open(p) as f:
         data = json.load(f)
 except FileNotFoundError:
     data = {}
-data["bypassPermissionsModeAccepted"] = True
+`
+	const preferencesSuffix = `
 projects = data.setdefault("projects", {})
 project = projects.setdefault("/home/ubuntu/workspace", {})
 project["hasTrustDialogAccepted"] = True
@@ -484,6 +495,7 @@ with open(p, "w") as f:
     json.dump(data, f)
 os.chmod(p, 0o600)
 `
+	acceptSandbox := preferencesPrefix + permissionAcceptance + preferencesSuffix
 	prefs := client.CommandContext(ctx, vmName, "python3", "-c", acceptSandbox)
 	prefs.UID = slicer.NonRootUser
 	prefs.GID = slicer.NonRootUser
