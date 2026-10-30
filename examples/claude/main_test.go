@@ -78,8 +78,13 @@ func TestResolveToken(t *testing.T) {
 func TestResolveClaudeCredentialsFromKeychain(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
 
-	path, cleanup, err := resolveClaudeCredentials("", func(context.Context) ([]byte, error) {
+	path, cleanup, err := resolveClaudeCredentials(ctx, "", func(ctx context.Context) ([]byte, error) {
+		if _, ok := ctx.Deadline(); !ok {
+			t.Fatal("Keychain lookup context has no deadline")
+		}
 		return []byte(`{"claudeAiOauth":{"accessToken":"test"}}`), nil
 	})
 	if err != nil {
@@ -144,7 +149,7 @@ func TestCreateVMCleansUpAfterWaitTimeout(t *testing.T) {
 		Wait:    slicer.SlicerCreateNodeWaitUserdata,
 		Timeout: wait,
 	})
-	if err == nil || !strings.Contains(err.Error(), "408 Request Timeout") {
+	if !slicer.IsAPIStatus(err, http.StatusRequestTimeout) {
 		t.Fatalf("error: got %v, want create timeout", err)
 	}
 	if !created.Load() {
@@ -198,5 +203,52 @@ func TestCreateVMReconcilesAfterClientDeadline(t *testing.T) {
 	}
 	if !deleted.Load() {
 		t.Fatal("late-created VM was not deleted")
+	}
+}
+
+func TestCreateVMReconcilesAfterGatewayFailure(t *testing.T) {
+	var created atomic.Bool
+	var deleted atomic.Bool
+	const runTag = "claude-gateway-failure-test"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/hostgroup/demo/nodes":
+			go func() {
+				time.Sleep(150 * time.Millisecond)
+				created.Store(true)
+			}()
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte(`{"error":"upstream response lost"}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/hostgroup/demo/nodes":
+			if !created.Load() {
+				_, _ = w.Write([]byte(`[]`))
+				return
+			}
+			_, _ = w.Write([]byte(`[{"hostname":"demo-3","hostgroup":"demo","tags":["run=claude-gateway-failure-test"]}]`))
+		case r.Method == http.MethodDelete && r.URL.Path == "/hostgroup/demo/nodes/demo-3":
+			deleted.Store(true)
+			_, _ = w.Write([]byte(`{"message":"deleted"}`))
+		default:
+			http.Error(w, "unexpected request", http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	client := slicer.NewSlicerClient(server.URL, "", "test", server.Client())
+	_, err := createVM(t.Context(), client, "demo", runTag, slicer.SlicerCreateNodeRequest{
+		Tags: []string{"example=claude", "run=" + runTag},
+	}, slicer.SlicerCreateNodeOptions{
+		Wait:    slicer.SlicerCreateNodeWaitUserdata,
+		Timeout: time.Second,
+	})
+	if !slicer.IsAPIStatus(err, http.StatusBadGateway) {
+		t.Fatalf("error: got %v, want gateway failure", err)
+	}
+	if !created.Load() {
+		t.Fatal("fake VM did not finish creating after the gateway failure")
+	}
+	if !deleted.Load() {
+		t.Fatal("VM created after the gateway failure was not deleted")
 	}
 }

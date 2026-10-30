@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -100,14 +101,14 @@ func run(opts options) error {
 		return err
 	}
 
-	credentials, cleanupCredentials, err := resolveClaudeCredentials(opts.credentials, opts.keychainLookup)
+	ctx, cancel := context.WithTimeout(context.Background(), opts.timeout)
+	defer cancel()
+
+	credentials, cleanupCredentials, err := resolveClaudeCredentials(ctx, opts.credentials, opts.keychainLookup)
 	if err != nil {
 		return err
 	}
 	defer cleanupCredentials()
-
-	ctx, cancel := context.WithTimeout(context.Background(), opts.timeout)
-	defer cancel()
 
 	client := slicer.NewSlicerClient(baseURL, token, "slicer-claude-example/2.0", nil)
 	hostGroup, err := selectHostGroup(ctx, client, opts.hostGroup)
@@ -209,7 +210,7 @@ func createVM(ctx context.Context, client *slicer.SlicerClient, hostGroup, runTa
 	}
 
 	createErr := fmt.Errorf("create VM: %w", err)
-	waitForVM := errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
+	waitForVM := ambiguousCreateFailure(err)
 	cleanupTimeout := time.Minute
 	if waitForVM {
 		cleanupTimeout = 30 * time.Second
@@ -220,6 +221,16 @@ func createVM(ctx context.Context, client *slicer.SlicerClient, hostGroup, runTa
 		return nil, errors.Join(createErr, fmt.Errorf("reconcile failed create: %w", cleanupErr))
 	}
 	return nil, createErr
+}
+
+func ambiguousCreateFailure(err error) bool {
+	var apiErr *slicer.APIError
+	if !errors.As(err, &apiErr) {
+		return true
+	}
+	return apiErr.StatusCode < http.StatusBadRequest ||
+		apiErr.StatusCode >= http.StatusInternalServerError ||
+		apiErr.StatusCode == http.StatusRequestTimeout
 }
 
 func deleteVMsByRunTag(ctx context.Context, client *slicer.SlicerClient, hostGroup, runTag string, waitForVM bool) error {
@@ -333,7 +344,7 @@ os.chmod(p, 0o600)
 	return nil
 }
 
-func resolveClaudeCredentials(configured string, keychainLookup func(context.Context) ([]byte, error)) (string, func(), error) {
+func resolveClaudeCredentials(ctx context.Context, configured string, keychainLookup func(context.Context) ([]byte, error)) (string, func(), error) {
 	if configured != "" {
 		path := expandPath(configured)
 		if _, err := os.Stat(path); err != nil {
@@ -359,7 +370,7 @@ func resolveClaudeCredentials(configured string, keychainLookup func(context.Con
 		}
 		keychainLookup = lookupClaudeKeychain
 	}
-	raw, err := keychainLookup(context.Background())
+	raw, err := keychainLookup(ctx)
 	if err != nil {
 		return "", func() {}, fmt.Errorf("read Claude credentials from macOS Keychain: %w", err)
 	}
