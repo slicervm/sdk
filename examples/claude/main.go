@@ -7,7 +7,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,7 +34,6 @@ type options struct {
 	baseURL           string
 	token             string
 	tokenFile         string
-	tokenExplicit     bool
 	tokenFileExplicit bool
 	hostGroup         string
 	credentials       string
@@ -48,7 +50,7 @@ type options struct {
 func main() {
 	opts := options{}
 	flag.StringVar(&opts.baseURL, "url", os.Getenv("SLICER_URL"), "Slicer API URL or Unix socket path")
-	flag.StringVar(&opts.token, "token", os.Getenv("SLICER_TOKEN"), "Slicer API token")
+	opts.token = os.Getenv("SLICER_TOKEN")
 	flag.StringVar(&opts.tokenFile, "token-file", os.Getenv("SLICER_TOKEN_FILE"), "file containing the Slicer API token")
 	flag.StringVar(&opts.hostGroup, "hostgroup", os.Getenv("SLICER_HOST_GROUP"), "host group for the VM (auto-selects sbox or the only group)")
 	flag.StringVar(&opts.credentials, "credentials-file", os.Getenv("CLAUDE_CREDENTIALS_FILE"), "Claude credentials file (defaults to ~/.claude/.credentials.json or the macOS Keychain)")
@@ -62,8 +64,6 @@ func main() {
 	flag.Parse()
 	flag.Visit(func(value *flag.Flag) {
 		switch value.Name {
-		case "token":
-			opts.tokenExplicit = true
 		case "token-file":
 			opts.tokenFileExplicit = true
 		}
@@ -82,16 +82,16 @@ func run(opts options) (runErr error) {
 	if strings.TrimSpace(opts.prompt) == "" {
 		return fmt.Errorf("--prompt must not be empty")
 	}
-	if opts.cpus < 1 || opts.ramGB < 1 {
-		return fmt.Errorf("--cpus and --ram-gb must be greater than zero")
+	if err := validateResources(opts.cpus, opts.ramGB); err != nil {
+		return err
 	}
 	if opts.timeout <= 0 {
 		return fmt.Errorf("--timeout must be greater than zero")
 	}
 
 	baseURL := expandPath(opts.baseURL)
-	if opts.tokenExplicit && opts.tokenFileExplicit {
-		return fmt.Errorf("--token and --token-file cannot be used together")
+	if err := validateEndpoint(baseURL); err != nil {
+		return err
 	}
 	if opts.tokenFileExplicit && strings.TrimSpace(opts.tokenFile) == "" {
 		return fmt.Errorf("--token-file must not be empty")
@@ -201,6 +201,53 @@ func run(opts options) (runErr error) {
 		fmt.Printf("Attach later with a VM shell, then run `claude agents` and `claude attach <id>`.\n")
 	}
 	return nil
+}
+
+func validateResources(cpus int, ramGB int64) error {
+	if cpus < 1 || ramGB < 1 {
+		return fmt.Errorf("--cpus and --ram-gb must be greater than zero")
+	}
+	const maxRAMGiB = int64(math.MaxInt64 / (1 << 30))
+	if ramGB > maxRAMGiB {
+		return fmt.Errorf("--ram-gb must not exceed %d", maxRAMGiB)
+	}
+	return nil
+}
+
+func validateEndpoint(baseURL string) error {
+	value := strings.TrimSpace(baseURL)
+	if strings.HasPrefix(value, "/") || strings.HasPrefix(value, "./") ||
+		strings.HasPrefix(value, "../") || strings.HasPrefix(value, "~/") ||
+		strings.HasPrefix(value, "unix://") ||
+		(strings.HasSuffix(value, ".sock") && !strings.Contains(value, "://")) {
+		return nil
+	}
+
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return fmt.Errorf("parse Slicer API URL: %w", err)
+	}
+	switch parsed.Scheme {
+	case "https":
+		if parsed.Hostname() == "" {
+			return fmt.Errorf("HTTPS Slicer API endpoint %q has no host", value)
+		}
+		return nil
+	case "http":
+		host := parsed.Hostname()
+		if host == "" {
+			return fmt.Errorf("HTTP Slicer API endpoint %q has no host", value)
+		}
+		if strings.EqualFold(host, "localhost") {
+			return nil
+		}
+		if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
+			return nil
+		}
+		return fmt.Errorf("refusing plaintext Slicer API at %q: use HTTPS, a loopback URL, or a Unix socket", value)
+	default:
+		return fmt.Errorf("unsupported Slicer API endpoint %q: use HTTPS, loopback HTTP, or a Unix socket", value)
+	}
 }
 
 func createVM(ctx context.Context, client *slicer.SlicerClient, hostGroup, runTag string, request slicer.SlicerCreateNodeRequest, createOptions slicer.SlicerCreateNodeOptions) (*slicer.SlicerCreateNodeResponse, error) {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +14,51 @@ import (
 
 	slicer "github.com/slicervm/sdk"
 )
+
+func TestValidateEndpoint(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		wantErr bool
+	}{
+		{name: "HTTPS", value: "https://slicer.example.com"},
+		{name: "localhost", value: "http://localhost:8080"},
+		{name: "IPv4 loopback", value: "http://127.0.0.1:8080"},
+		{name: "IPv6 loopback", value: "http://[::1]:8080"},
+		{name: "absolute socket", value: "/run/slicer.sock"},
+		{name: "relative socket", value: "./slicer.sock"},
+		{name: "Mac socket", value: "~/slicer-mac/slicer.sock"},
+		{name: "remote plaintext", value: "http://192.0.2.1:8080", wantErr: true},
+		{name: "remote plaintext socket suffix", value: "http://192.0.2.1/api.sock", wantErr: true},
+		{name: "HTTPS without host", value: "https:///api", wantErr: true},
+		{name: "missing scheme", value: "slicer.example.com:8080", wantErr: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateEndpoint(test.value)
+			if test.wantErr && err == nil {
+				t.Fatal("expected an error")
+			}
+			if !test.wantErr && err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestValidateResources(t *testing.T) {
+	const maxRAMGiB = int64(math.MaxInt64 / (1 << 30))
+	if err := validateResources(1, maxRAMGiB); err != nil {
+		t.Fatalf("maximum RAM should be valid: %v", err)
+	}
+	if err := validateResources(1, maxRAMGiB+1); err == nil {
+		t.Fatal("overflowing RAM should be rejected")
+	}
+	if err := validateResources(0, 1); err == nil {
+		t.Fatal("zero CPUs should be rejected")
+	}
+}
 
 func TestSelectHostGroup(t *testing.T) {
 	tests := []struct {
