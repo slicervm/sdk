@@ -278,7 +278,8 @@ injects it on the inner request.
 
 ### Samples/Examples
 
-Each example is its own module requiring `github.com/slicervm/sdk v0.0.49` with `replace github.com/slicervm/sdk => ../../`, so run examples from their own directory.
+Each example is its own module with a replace directive pointing at the local
+SDK checkout, so run examples from their own directory.
 
 * [Create a VM and block until agent readiness](examples/create/main.go)
 * [Create a VM with k3s installed via Userdata](examples/k3s-userdata/main.go)
