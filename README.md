@@ -278,8 +278,9 @@ injects it on the inner request.
 
 ### Samples/Examples
 
-Each example is its own module with a replace directive pointing at the local
-SDK checkout, so run examples from their own directory.
+Examples with their own `go.mod` use a replace directive pointing at the local
+SDK checkout, so run those examples from their own directory. Other examples
+build as part of the root SDK module.
 
 * [Create a VM and block until agent readiness](examples/create/main.go)
 * [Create a VM with k3s installed via Userdata](examples/k3s-userdata/main.go)

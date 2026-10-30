@@ -459,6 +459,7 @@ func (c *RemoteCmd) processResults() {
 	var exitCode int
 	var hasError bool
 	var errorMsg string
+	var sawExit bool
 
 	for result := range c.resultChan {
 		switch result.Type {
@@ -493,6 +494,7 @@ func (c *RemoteCmd) processResults() {
 
 		// Exit frame carries command exit data.
 		if result.Type == "exit" {
+			sawExit = true
 			if result.Pid > 0 {
 				// keep pid if we did not receive a started frame
 				c.ProcessState = &RemoteProcessState{exited: false, pid: result.Pid}
@@ -514,6 +516,10 @@ func (c *RemoteCmd) processResults() {
 				exitCode = 1 // Default to 1 for errors
 			}
 		}
+	}
+	if !sawExit && c.ctx.Err() != nil {
+		c.waitErr = c.ctx.Err()
+		return
 	}
 
 	var pid int

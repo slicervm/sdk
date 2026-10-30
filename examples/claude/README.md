@@ -97,7 +97,12 @@ The retained VM also contains the copied Claude credential. Delete it when the
 session is no longer required:
 
 ```bash
-slicer vm delete <hostname> --url "$SLICER_URL"
+# Authenticated TCP API
+SLICER_TOKEN="$(sudo cat /var/lib/slicer/auth/token)" \
+slicer vm delete <hostname> --url https://slicer.example.com
+
+# Slicer for Mac or an unauthenticated local Unix socket
+slicer vm delete <hostname> --url ~/slicer-mac/slicer.sock
 ```
 
 An interactive implementation could instead put Claude in a named tmux session.
@@ -108,7 +113,7 @@ existing session. No separate lock file is required.
 Useful options:
 
 ```text
---prompt string            Prompt for the one-shot Claude invocation
+--prompt string            Prompt to send to Claude
 --background               Start a Claude session for later attachment
 --hostgroup string         Explicit host group
 --credentials-file string  Claude credentials file

@@ -398,6 +398,30 @@ func TestRemoteCmd_StartWait(t *testing.T) {
 	}
 }
 
+func TestRemoteCmd_ContextCancellationAfterOutput(t *testing.T) {
+	server, _ := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeExecResult(w, SlicerExecWriteResult{
+			Type:      "stdout",
+			Timestamp: time.Now(),
+			Stdout:    "partial output\n",
+		})
+		<-r.Context().Done()
+	})
+
+	client := NewSlicerClient(server.URL, "test-token", "test-agent", nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	cmd := client.Command(ctx, "test-vm", "slow-command")
+	output, err := cmd.CombinedOutput()
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("CombinedOutput() error = %v, want context deadline exceeded", err)
+	}
+	if !strings.Contains(string(output), "partial output") {
+		t.Fatalf("CombinedOutput() = %q, want partial output", output)
+	}
+}
+
 func TestRemoteCmd_DoubleStart(t *testing.T) {
 	server, _ := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		writeExecResult(w, SlicerExecWriteResult{
