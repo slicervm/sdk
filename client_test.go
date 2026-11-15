@@ -826,13 +826,14 @@ func TestMemoryCommitSendsModeWithoutMetadata(t *testing.T) {
 
 func TestGetHostGroupsMaxCount(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		body string
-		want int
+		name  string
+		body  string
+		want  int
+		known bool
 	}{
-		{"limited", `[{"name":"agents","count":2,"max_count":6}]`, 6},
-		{"unlimited", `[{"name":"agents","count":2,"max_count":0}]`, 0},
-		{"older-server", `[{"name":"agents","count":2}]`, 0},
+		{"limited", `[{"name":"agents","count":2,"max_count":6}]`, 6, true},
+		{"unlimited", `[{"name":"agents","count":2,"max_count":0}]`, 0, true},
+		{"older-server", `[{"name":"agents","count":2}]`, 0, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -851,8 +852,15 @@ func TestGetHostGroupsMaxCount(t *testing.T) {
 			if len(groups) != 1 {
 				t.Fatalf("got %d groups, want 1", len(groups))
 			}
-			if groups[0].Count != 2 || groups[0].MaxCount != tc.want {
-				t.Fatalf("got count=%d max_count=%d, want 2 and %d", groups[0].Count, groups[0].MaxCount, tc.want)
+			if groups[0].Count != 2 {
+				t.Fatalf("count=%d, want 2", groups[0].Count)
+			}
+			limit := groups[0].MaxCount
+			if (limit != nil) != tc.known {
+				t.Fatalf("max_count presence=%t, want %t", limit != nil, tc.known)
+			}
+			if limit != nil && *limit != tc.want {
+				t.Fatalf("max_count=%d, want %d", *limit, tc.want)
 			}
 		})
 	}
