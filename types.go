@@ -397,6 +397,9 @@ func (n *SlicerCreateNodeResponse) IPAddress() net.IP {
 
 // SlicerHostGroup represents a host group from the /hostgroup endpoint.
 type SlicerHostGroup struct {
+	// MaxCount is the configured VM limit for the group; zero means unlimited.
+	// Older servers omit this field, which also decodes as zero.
+	MaxCount int    `json:"max_count"`
 	Name     string `json:"name,omitempty"`
 	Count    int    `json:"count,omitempty"`
 	RamBytes int64  `json:"ram_bytes,omitempty"` // RAM size in bytes

@@ -823,3 +823,37 @@ func TestMemoryCommitSendsModeWithoutMetadata(t *testing.T) {
 		t.Fatalf("mode = %q", commit.Mode)
 	}
 }
+
+func TestGetHostGroupsMaxCount(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want int
+	}{
+		{"limited", `[{"name":"agents","count":2,"max_count":6}]`, 6},
+		{"unlimited", `[{"name":"agents","count":2,"max_count":0}]`, 0},
+		{"older-server", `[{"name":"agents","count":2}]`, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.Path != "/hostgroup" {
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				io.WriteString(w, tc.body)
+			}))
+			defer server.Close()
+			client := NewSlicerClient(server.URL, "", "test", nil)
+			groups, err := client.GetHostGroups(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(groups) != 1 {
+				t.Fatalf("got %d groups, want 1", len(groups))
+			}
+			if groups[0].Count != 2 || groups[0].MaxCount != tc.want {
+				t.Fatalf("got count=%d max_count=%d, want 2 and %d", groups[0].Count, groups[0].MaxCount, tc.want)
+			}
+		})
+	}
+}
